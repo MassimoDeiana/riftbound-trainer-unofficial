@@ -28,8 +28,9 @@ describe('collection CSV import (riftbound.gg format)', () => {
     expect(Object.values(res.collection).reduce((a, b) => a + b, 0)).toBe(3)
   })
 
-  const realFile = '/Users/massimodeiana/Downloads/collection.csv'
-  it.skipIf(!existsSync(realFile))('imports the real riftbound.gg export without unmatched rows', () => {
+  // Optional: point RB_COLLECTION_CSV at a real riftbound.gg export to sanity-check it.
+  const realFile = process.env.RB_COLLECTION_CSV ?? ''
+  it.skipIf(!realFile || !existsSync(realFile))('imports the real riftbound.gg export without unmatched rows', () => {
     const res = importCollectionCsv(readFileSync(realFile, 'utf8'))
     console.log(
       `real export: ${res.matched} lignes importées, ${Object.values(res.collection).reduce((a, b) => a + b, 0)} cartes, non reconnues: ${res.unmatched.length}`,
