@@ -38,6 +38,9 @@ function coachBridge(): Plugin {
 }
 
 // https://vite.dev/config/
-export default defineConfig({
+export default defineConfig(({ command }) => ({
+  // GitHub Pages serves the app under /<repo>/; keep dev at / so the coach bridge
+  // and localhost URLs stay unchanged.
+  base: command === 'build' ? '/riftbound-trainer-unofficial/' : '/',
   plugins: [react(), coachBridge()],
-})
+}))
