@@ -4,7 +4,7 @@ import { joinRoom, selfId, type Room } from 'trystero'
  * P2P game room over WebRTC (Trystero, Nostr strategy). No server: peers find
  * each other through public relays using appId + room code.
  */
-export const APP_ID = 'riftbound-table-v1'
+export const APP_ID = 'riftbound-table-v2'
 
 export { selfId }
 

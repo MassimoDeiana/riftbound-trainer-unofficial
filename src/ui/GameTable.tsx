@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { cardsById, DOMAIN_COLORS, textify, type Domain } from '../data/cards'
+import { scriptFor } from '../effects/registry'
 import { def, keywords, unitMight } from '../engine/cardinfo'
+import { defaultAssignment } from '../engine/core'
+import { might } from '../engine/queries'
 import type { GameAction, GameState, LocationRef, PlayerIx, UnitEntity } from '../engine/types'
 import { MAX_MULLIGAN, VICTORY_SCORE } from '../engine/types'
 import { announceHover, CardImg } from './CardImg'
@@ -37,6 +40,7 @@ export function GameTable({
   const my = state.players[me]
   const op = state.players[opp]
   const [selected, setSelected] = useState<number[]>([])
+  const [targetSel, setTargetSel] = useState<number[]>([])
   const [pendingCard, setPendingCard] = useState<string | null>(null)
   const [accel, setAccel] = useState(false)
   const [tools, setTools] = useState(false)
@@ -44,6 +48,7 @@ export function GameTable({
   const [trashView, setTrashView] = useState<PlayerIx | null>(null)
   const [mullSel, setMullSel] = useState<string[]>([])
   const [hints, setHints] = useState(() => localStorage.getItem('rb.hints') !== '0')
+  const [autoPass, setAutoPass] = useState(() => localStorage.getItem('rb.autopass') !== '0')
   const logRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -54,6 +59,14 @@ export function GameTable({
     setSelected((sel) => sel.filter((uid) => state.units.some((u) => u.uid === uid)))
   }, [state])
 
+  // Reset the target selection whenever the pending choice changes.
+  useEffect(() => {
+    setTargetSel([])
+  }, [state.pending])
+
+  const unitChoice =
+    state.pending?.spec.kind === 'unit' && state.pending.player === me ? state.pending.spec : null
+
   const toggleHints = () => {
     setHints((h) => {
       localStorage.setItem('rb.hints', h ? '0' : '1')
@@ -62,16 +75,37 @@ export function GameTable({
   }
 
   const myTurn = state.turnPlayer === me && state.phase === 'action'
-  const neutralOpen = state.chain.length === 0 && !state.showdown
+  const neutralOpen = state.chain.length === 0 && !state.showdown && !state.pending
   const chainTop = state.chain[state.chain.length - 1]
-  const chainLocked = state.chain.length > 0 && state.chainPasses >= 2
 
   const canPass =
-    (state.chain.length > 0 && state.chainActive === me && !chainLocked) ||
-    (state.chain.length === 0 && state.showdown?.focus === me)
-  const mustResolve = chainLocked && chainTop?.controller === me
+    !state.pending &&
+    ((state.chain.length > 0 && state.chainActive === me) ||
+      (state.chain.length === 0 && state.showdown?.focus === me))
 
   const act = (a: GameAction) => dispatch(a)
+
+  // Auto-pass (façon Arena) : passe automatiquement les fenêtres de
+  // réaction/showdown quand aucune carte jouable ne le justifie.
+  const hasPlayableWindowCard = (() => {
+    if (!canPass) return false
+    const inChain = state.chain.length > 0
+    return my.hand.some((cardId) => {
+      const kw = keywords(cardId)
+      if (inChain ? !kw.reaction : !(kw.action || kw.reaction)) return false
+      const card = def(cardId)
+      const pool = my.pool
+      const poolPower =
+        (pool.power.Universal ?? 0) + card.domains.reduce((n, d) => n + (pool.power[d] ?? 0), 0)
+      return pool.energy >= (card.energy ?? 0) && poolPower >= (card.power ?? 0)
+    })
+  })()
+  useEffect(() => {
+    if (!autoPass || !canPass || hasPlayableWindowCard || timeTravel?.review) return
+    const t = setTimeout(() => dispatch({ t: 'pass', player: me }), 350)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state, autoPass, canPass, hasPlayableWindowCard])
 
   const playPending = (loc?: LocationRef) => {
     if (!pendingCard) return
@@ -96,6 +130,16 @@ export function GameTable({
       setToolUnit(toolUnit === u.uid ? null : u.uid)
       return
     }
+    // Targeting mode: clicking a legal unit toggles it in the choice.
+    if (unitChoice) {
+      if (!unitChoice.legal.includes(u.uid)) return
+      setTargetSel((sel) => {
+        if (sel.includes(u.uid)) return sel.filter((x) => x !== u.uid)
+        if (sel.length >= unitChoice.max) return unitChoice.max === 1 ? [u.uid] : sel
+        return [...sel, u.uid]
+      })
+      return
+    }
     if (u.controller === me && u.kind === 'unit' && u.ready && neutralOpen && myTurn) {
       setSelected((sel) => (sel.includes(u.uid) ? sel.filter((x) => x !== u.uid) : [...sel, u.uid]))
     }
@@ -114,6 +158,44 @@ export function GameTable({
 
   const renderTool = (u: UnitEntity) =>
     toolUnit === u.uid && tools ? <UnitTools u={u} me={me} act={act} close={() => setToolUnit(null)} /> : null
+
+  /** Scripted activated abilities of one of my units (⚡ button); -1 = Equip. */
+  const abilitiesOf = (u: UnitEntity): number[] => {
+    if (u.controller !== me || !myTurn || !neutralOpen) return []
+    const script = scriptFor(u.cardId)
+    if (!script) return []
+    const out: number[] = []
+    if (script.equip && u.kind === 'gear' && (u.attachedTo === undefined || u.attachedTo === null)) out.push(-1)
+    if (script.empower && u.kind === 'unit' && !u.empowered) out.push(-2)
+    const unattachedEquip = script.equip && u.kind === 'gear' && (u.attachedTo === undefined || u.attachedTo === null)
+    if (!unattachedEquip) {
+      for (const [ix, ab] of (script.abilities ?? []).entries()) {
+        if (ab.kind === 'activated') out.push(ix)
+      }
+    }
+    return out
+  }
+
+  const legendAbilities = (() => {
+    if (!myTurn || !neutralOpen) return []
+    const script = scriptFor(my.legendId)
+    if (!script?.abilities) return []
+    return script.abilities.flatMap((ab, ix) => (ab.kind === 'activated' ? [ix] : []))
+  })()
+
+  const renderAbility = (u: UnitEntity) =>
+    abilitiesOf(u).length > 0 ? (
+      <button
+        className="unit-ability"
+        title={textify(def(u.cardId).text)}
+        onClick={(e) => {
+          e.stopPropagation()
+          act({ t: 'activateAbility', player: me, source: { kind: 'unit', uid: u.uid }, abilityIx: abilitiesOf(u)[0] })
+        }}
+      >
+        ⚡
+      </button>
+    ) : null
 
   const [menuOpen, setMenuOpen] = useState(false)
   const [showLog, setShowLog] = useState(false)
@@ -142,6 +224,18 @@ export function GameTable({
             {menuOpen && (
               <div className="menu-pop" onMouseLeave={() => setMenuOpen(false)}>
                 <span className="badge">{roomCode}</span>
+                <button
+                  className={`small ${autoPass ? 'primary' : ''}`}
+                  title="Passe automatiquement quand tu n'as aucune Réaction jouable"
+                  onClick={() =>
+                    setAutoPass((a) => {
+                      localStorage.setItem('rb.autopass', a ? '0' : '1')
+                      return !a
+                    })
+                  }
+                >
+                  {autoPass ? '⏩ Auto-passe : ON' : '⏩ Auto-passe : OFF'}
+                </button>
                 <button className="small danger" onClick={() => confirm('Abandonner ?') && act({ t: 'concede', player: me })}>
                   Abandonner
                 </button>
@@ -166,6 +260,8 @@ export function GameTable({
           hints={hints}
           onUnitClick={unitClick}
           selected={selected}
+          targetSel={targetSel}
+          targetable={unitChoice?.legal ?? []}
           renderTool={renderTool}
         />
 
@@ -220,7 +316,7 @@ export function GameTable({
                     {unitsHere
                       .filter((u) => u.controller === opp)
                       .map((u) => (
-                        <Unit key={u.uid} u={u} selected={selected.includes(u.uid)} onClick={() => unitClick(u)} tool={renderTool(u)} me={me} width={92} />
+                        <Unit key={u.uid} u={u} state={state} selected={selected.includes(u.uid) || targetSel.includes(u.uid)} targetable={!!unitChoice?.legal.includes(u.uid)} onClick={() => unitClick(u)} tool={<>{renderTool(u)}{renderAbility(u)}</>} me={me} width={92} />
                       ))}
                   </div>
                   <div className="bf-mid">
@@ -230,7 +326,7 @@ export function GameTable({
                     {unitsHere
                       .filter((u) => u.controller === me)
                       .map((u) => (
-                        <Unit key={u.uid} u={u} selected={selected.includes(u.uid)} onClick={() => unitClick(u)} tool={renderTool(u)} me={me} width={92} />
+                        <Unit key={u.uid} u={u} state={state} selected={selected.includes(u.uid) || targetSel.includes(u.uid)} targetable={!!unitChoice?.legal.includes(u.uid)} onClick={() => unitClick(u)} tool={<>{renderTool(u)}{renderAbility(u)}</>} me={me} width={92} />
                       ))}
                   </div>
                 </div>
@@ -256,11 +352,16 @@ export function GameTable({
                       🂠 Cacher ici (1◆)
                     </button>
                   )}
-                  {state.pendingCombat.includes(ix) && state.turnPlayer === me && neutralOpen && (
-                    <button className={`small danger ${hints ? 'hint-glow' : ''}`} onClick={() => act({ t: 'chooseCombat', player: me, battlefield: ix })}>
-                      ⚔️ Lancer le combat
-                    </button>
-                  )}
+                  {state.pending?.spec.kind === 'battlefield' &&
+                    state.pending.player === me &&
+                    state.pending.spec.options.includes(ix) && (
+                      <button
+                        className={`small danger ${hints ? 'hint-glow' : ''}`}
+                        onClick={() => act({ t: 'choose', player: me, choice: { kind: 'battlefield', battlefield: ix } })}
+                      >
+                        ⚔️ {state.pending.spec.reason === 'combat' ? 'Combattre ici' : 'Showdown ici'}
+                      </button>
+                    )}
                 </div>
               </div>
             )
@@ -283,25 +384,9 @@ export function GameTable({
                   {i + 1}. {item.label} ({state.players[item.controller].name})
                 </span>
               ))}
-              {!chainLocked && state.chainActive !== null && (
+              {state.chainActive !== null && !state.pending && (
                 <span style={{ marginLeft: 8 }}>
                   → <strong>{state.players[state.chainActive].name}</strong> répond ([Reaction]) ou passe
-                </span>
-              )}
-              {mustResolve && chainTop && chainTop.script === 'vision' && (
-                <span style={{ marginLeft: 8 }}>
-                  Vision — dessus du deck : <strong>{my.deck[0] ? def(my.deck[0]).name : '(vide)'}</strong>
-                  <button className="small primary" onClick={() => act({ t: 'resolveChainTop', player: me, choice: 'keep' })}>
-                    Garder
-                  </button>
-                  <button className="small" onClick={() => act({ t: 'resolveChainTop', player: me, choice: 'recycle' })}>
-                    Recycler
-                  </button>
-                </span>
-              )}
-              {chainLocked && chainTop && chainTop.controller !== me && (
-                <span style={{ marginLeft: 8 }} className="dim">
-                  {state.players[chainTop.controller].name} résout {chainTop.label}…
                 </span>
               )}
             </div>
@@ -314,7 +399,7 @@ export function GameTable({
           <span className="zone-etch">base</span>
           <div className="strip-units">
             {state.units.filter((u) => u.location === 'base' && u.controller === me).map((u) => (
-              <Unit key={u.uid} u={u} selected={selected.includes(u.uid)} onClick={() => unitClick(u)} tool={renderTool(u)} me={me} width={86} />
+              <Unit key={u.uid} u={u} state={state} selected={selected.includes(u.uid) || targetSel.includes(u.uid)} targetable={!!unitChoice?.legal.includes(u.uid)} onClick={() => unitClick(u)} tool={<>{renderTool(u)}{renderAbility(u)}</>} me={me} width={86} />
             ))}
             {selected.length > 0 && (
               <button className="small primary" onClick={() => moveTo('base')}>
@@ -334,9 +419,20 @@ export function GameTable({
 
           <div className="dock-row">
             <div className="dock-left">
-              <div className="ident-card">
+              <div className={`ident-card ${my.legendReady ? '' : 'exhausted'}`}>
                 <CardImg card={def(my.legendId)} width={178} />
                 <span className="zone-etch">légende</span>
+                {legendAbilities.length > 0 && my.legendReady && (
+                  <button
+                    className="small primary legend-activate"
+                    title={textify(def(my.legendId).text)}
+                    onClick={() =>
+                      act({ t: 'activateAbility', player: me, source: { kind: 'legend' }, abilityIx: legendAbilities[0] })
+                    }
+                  >
+                    ⚡ Activer
+                  </button>
+                )}
               </div>
               {my.championInZone ? (
                 <div className="ident-card">
@@ -403,6 +499,8 @@ export function GameTable({
               </div>
               {timeTravel?.review ? (
                 <div className="dock-panel dim">🎬 Revue — lecture seule</div>
+              ) : state.pending ? (
+                <ChoicePanel state={state} me={me} act={act} hints={hints} targetSel={targetSel} />
               ) : (
                 <ActionDock
                   state={state}
@@ -416,7 +514,6 @@ export function GameTable({
                   playPending={playPending}
                   setPendingCard={setPendingCard}
                   canPass={canPass}
-                  mustResolve={mustResolve}
                   chainTop={chainTop}
                   myTurn={myTurn}
                   neutralOpen={neutralOpen}
@@ -481,6 +578,203 @@ export function GameTable({
   )
 }
 
+// ---------------------------------------------------------------- pending choice panel
+
+/** Renders the current pending choice (damage assignment, battlefield pick,
+ *  Vision, VM targets/cards/modes/yes-no). */
+function ChoicePanel({
+  state,
+  me,
+  act,
+  hints,
+  targetSel,
+}: {
+  state: GameState
+  me: PlayerIx
+  act: (a: GameAction) => void
+  hints: boolean
+  targetSel: number[]
+}) {
+  const pending = state.pending!
+  const spec = pending.spec
+  const [assign, setAssign] = useState<Record<number, number>>(() => defaultAssignment(state))
+  const [cardSel, setCardSel] = useState<number[]>([])
+  const [modeSel, setModeSel] = useState<number[]>([])
+  useEffect(() => {
+    setAssign(defaultAssignment(state))
+    setCardSel([])
+    setModeSel([])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.pending])
+
+  if (pending.player !== me) {
+    return (
+      <div className="dock-panel dim">
+        ⏳ {state.players[pending.player].name} est en train de choisir…
+      </div>
+    )
+  }
+
+  if (spec.kind === 'battlefield') {
+    return (
+      <div className="dock-panel">
+        <div className="dock-title">{spec.reason === 'combat' ? '⚔️ Choisis le combat' : '🚩 Choisis le showdown'}</div>
+        <div className="dock-hint">Clique un champ de bataille surligné ↑</div>
+      </div>
+    )
+  }
+
+  if (spec.kind === 'vision') {
+    const top = state.players[me].deck[0]
+    return (
+      <div className="dock-panel">
+        <div className="dock-title">👁 Vision</div>
+        <div className="dock-hint">Dessus du deck : <strong>{top ? def(top).name : '(vide)'}</strong></div>
+        <button className={`dock-btn primary ${hints ? 'hint-glow' : ''}`} onClick={() => act({ t: 'choose', player: me, choice: { kind: 'vision', recycle: false } })}>
+          Garder
+        </button>
+        <button className="dock-btn" onClick={() => act({ t: 'choose', player: me, choice: { kind: 'vision', recycle: true } })}>
+          Recycler
+        </button>
+      </div>
+    )
+  }
+
+  if (spec.kind === 'unit') {
+    const min = pending.vm?.optional ? 0 : spec.min
+    const ok = targetSel.length >= min && targetSel.length <= spec.max
+    return (
+      <div className="dock-panel">
+        <div className="dock-title">🎯 {spec.prompt ?? `Choisis ${spec.min === spec.max ? spec.max : `${min}–${spec.max}`} cible(s)`}</div>
+        <div className="dock-hint">Clique les unités surlignées ↑ ({targetSel.length} choisie(s))</div>
+        <button
+          className={`dock-btn primary ${hints ? 'hint-glow' : ''}`}
+          disabled={!ok}
+          onClick={() => act({ t: 'choose', player: me, choice: { kind: 'unit', uids: targetSel } })}
+        >
+          Valider
+        </button>
+        {pending.vm?.optional && (
+          <button className="dock-btn ghost" onClick={() => act({ t: 'choose', player: me, choice: { kind: 'unit', uids: [] } })}>
+            Ne rien choisir
+          </button>
+        )}
+      </div>
+    )
+  }
+
+  if (spec.kind === 'card') {
+    const zone =
+      spec.zone === 'hand'
+        ? state.players[spec.player].hand
+        : spec.zone === 'deck'
+          ? state.players[spec.player].deck
+          : state.players[spec.player].trash
+    const toggle = (i: number) =>
+      setCardSel((sel) => (sel.includes(i) ? sel.filter((x) => x !== i) : sel.length < spec.max ? [...sel, i] : spec.max === 1 ? [i] : sel))
+    return (
+      <div className="dock-panel choice-cards">
+        <div className="dock-title">🃏 {spec.prompt ?? `Choisis ${spec.min === spec.max ? spec.max : `${spec.min}–${spec.max}`} carte(s)`} ({spec.zone === 'hand' ? 'main' : spec.zone === 'deck' ? 'dessus du deck' : 'défausse'})</div>
+        <div className="choice-card-row">
+          {spec.legal.map((i) => (
+            <CardImg key={i} card={def(zone[i])} width={72} selected={cardSel.includes(i)} onClick={() => toggle(i)} />
+          ))}
+        </div>
+        <button
+          className={`dock-btn primary ${hints ? 'hint-glow' : ''}`}
+          disabled={cardSel.length < spec.min || cardSel.length > spec.max}
+          onClick={() => act({ t: 'choose', player: me, choice: { kind: 'card', indices: cardSel } })}
+        >
+          Valider
+        </button>
+      </div>
+    )
+  }
+
+  if (spec.kind === 'mode') {
+    const toggle = (i: number) =>
+      setModeSel((sel) => (sel.includes(i) ? sel.filter((x) => x !== i) : sel.length < spec.n ? [...sel, i] : spec.n === 1 ? [i] : sel))
+    return (
+      <div className="dock-panel">
+        <div className="dock-title">Choisis {spec.n} option(s)</div>
+        {spec.options.map((o, i) => (
+          <button key={i} className={`dock-btn ${modeSel.includes(i) ? 'primary' : ''}`} onClick={() => toggle(i)}>
+            {textify(o)}
+          </button>
+        ))}
+        <button
+          className="dock-btn primary"
+          disabled={modeSel.length !== spec.n}
+          onClick={() => act({ t: 'choose', player: me, choice: { kind: 'mode', picks: modeSel } })}
+        >
+          Valider
+        </button>
+      </div>
+    )
+  }
+
+  if (spec.kind === 'yesNo') {
+    return (
+      <div className="dock-panel">
+        <div className="dock-title">{textify(spec.prompt)}</div>
+        <button className={`dock-btn primary ${hints ? 'hint-glow' : ''}`} onClick={() => act({ t: 'choose', player: me, choice: { kind: 'yesNo', yes: true } })}>
+          Oui
+        </button>
+        <button className="dock-btn" onClick={() => act({ t: 'choose', player: me, choice: { kind: 'yesNo', yes: false } })}>
+          Non
+        </button>
+      </div>
+    )
+  }
+
+  if (spec.kind === 'location') {
+    return (
+      <div className="dock-panel">
+        <div className="dock-title">📍 {spec.prompt ?? 'Choisis la destination'}</div>
+        {spec.options.map((loc) => (
+          <button
+            key={String(loc)}
+            className="dock-btn"
+            onClick={() => act({ t: 'choose', player: me, choice: { kind: 'location', loc } })}
+          >
+            {loc === 'base' ? 'Base' : def(state.battlefields[loc].cardId).name}
+          </button>
+        ))}
+      </div>
+    )
+  }
+
+  // assignDamage
+  const targets = spec.targets
+    .map((uid) => state.units.find((u) => u.uid === uid))
+    .filter((u): u is UnitEntity => u !== undefined)
+  const total = targets.reduce((n, u) => n + (assign[u.uid] ?? 0), 0)
+  const remaining = spec.pool - total
+  const bump = (uid: number, d: number) =>
+    setAssign((a) => ({ ...a, [uid]: Math.max(0, (a[uid] ?? 0) + d) }))
+  return (
+    <div className="dock-panel">
+      <div className="dock-title">💥 Assigne {spec.pool} dégât(s)</div>
+      {targets.map((u) => (
+        <div key={u.uid} className="assign-row">
+          <span className="assign-name">{def(u.cardId).name} ({unitMight(u)}⚔️{u.damage > 0 ? ` -${u.damage}` : ''})</span>
+          <button className="small" onClick={() => bump(u.uid, -1)} disabled={(assign[u.uid] ?? 0) === 0}>−</button>
+          <strong>{assign[u.uid] ?? 0}</strong>
+          <button className="small" onClick={() => bump(u.uid, 1)} disabled={remaining <= 0}>+</button>
+        </div>
+      ))}
+      <div className="dock-hint">{remaining === 0 ? 'Tout est assigné.' : `Reste ${remaining} à assigner`}</div>
+      <button
+        className={`dock-btn primary ${hints ? 'hint-glow' : ''}`}
+        disabled={remaining !== 0}
+        onClick={() => act({ t: 'choose', player: me, choice: { kind: 'assignDamage', assignments: assign } })}
+      >
+        Valider
+      </button>
+    </div>
+  )
+}
+
 // ---------------------------------------------------------------- contextual action dock
 
 function ActionDock({
@@ -495,7 +789,6 @@ function ActionDock({
   playPending,
   setPendingCard,
   canPass,
-  mustResolve,
   chainTop,
   myTurn,
   neutralOpen,
@@ -515,7 +808,6 @@ function ActionDock({
   playPending: (loc?: LocationRef) => void
   setPendingCard: (id: string | null) => void
   canPass: boolean
-  mustResolve: boolean
   chainTop: GameState['chain'][number] | undefined
   myTurn: boolean
   neutralOpen: boolean
@@ -525,6 +817,7 @@ function ActionDock({
   setTools: (b: boolean) => void
 }) {
   const my = state.players[me]
+  void chainTop
 
   // Card selected from hand: how to play it
   if (pendingDef) {
@@ -577,18 +870,6 @@ function ActionDock({
     return <div className="dock-panel dim">En attente de l'adversaire…</div>
   }
 
-  // Resolve top of chain
-  if (mustResolve && chainTop && chainTop.script !== 'vision') {
-    return (
-      <div className="dock-panel">
-        <button className={`dock-btn primary ${hints ? 'hint-glow' : ''}`} onClick={() => act({ t: 'resolveChainTop', player: me })}>
-          Résoudre {chainTop.label}
-        </button>
-        <div className="dock-hint">applique son effet avec 🔧 si besoin</div>
-      </div>
-    )
-  }
-
   // Pass (chain / showdown)
   if (canPass) {
     return (
@@ -598,11 +879,6 @@ function ActionDock({
         </button>
       </div>
     )
-  }
-
-  // Combat to launch
-  if (myTurn && neutralOpen && state.pendingCombat.length > 0) {
-    return <div className="dock-panel dim">⚔️ Lance le combat sur le champ de bataille ↑</div>
   }
 
   // Normal turn: end turn
@@ -724,6 +1000,8 @@ function PlayerBar({
   hints,
   onUnitClick,
   selected,
+  targetSel = [],
+  targetable = [],
   renderTool,
 }: {
   state: GameState
@@ -734,6 +1012,8 @@ function PlayerBar({
   hints: boolean
   onUnitClick: (u: UnitEntity) => void
   selected: number[]
+  targetSel?: number[]
+  targetable?: number[]
   renderTool: (u: UnitEntity) => React.ReactNode
 }) {
   const pl = state.players[p]
@@ -755,7 +1035,7 @@ function PlayerBar({
         <span className="zone-etch">base</span>
         <div className="strip-units">
           {baseUnits.map((u) => (
-            <Unit key={u.uid} u={u} selected={selected.includes(u.uid)} onClick={() => onUnitClick(u)} tool={renderTool(u)} me={me} width={72} />
+            <Unit key={u.uid} u={u} state={state} selected={selected.includes(u.uid) || (targetSel?.includes(u.uid) ?? false)} targetable={!!targetable?.includes(u.uid)} onClick={() => onUnitClick(u)} tool={renderTool(u)} me={me} width={72} />
           ))}
           {baseUnits.length === 0 && <span className="dim" style={{ fontSize: 11 }}>—</span>}
         </div>
@@ -771,31 +1051,39 @@ function PlayerBar({
 function Unit({
   u,
   selected,
+  targetable = false,
   onClick,
   tool,
   me,
+  state,
   width = 86,
 }: {
   u: UnitEntity
   selected: boolean
+  targetable?: boolean
   onClick: () => void
   tool: React.ReactNode
   me: PlayerIx
+  state?: GameState
   width?: number
 }) {
   const card = def(u.cardId)
-  const might = unitMight(u)
+  const m = state ? might(state, u) : unitMight(u)
   return (
-    <div className={`unit ${u.ready ? '' : 'exhausted'} ${u.controller === me ? 'mine' : 'theirs'} ${tool ? 'tools-open' : ''}`} style={{ position: 'relative' }}>
+    <div
+      className={`unit ${u.ready ? '' : 'exhausted'} ${u.controller === me ? 'mine' : 'theirs'} ${tool ? 'tools-open' : ''} ${targetable ? 'targetable' : ''}`}
+      style={{ position: 'relative' }}
+    >
       {/* cropped: show only the top of the card (art + cost + name); full text on hover */}
       <CardImg card={card} width={width} crop={0.62} selected={selected} onClick={onClick} />
       <div className="unit-badges">
-        {u.kind === 'unit' && <span className="badge might">{might}⚔️</span>}
+        {u.kind === 'unit' && <span className="badge might">{m}⚔️</span>}
         {u.damage > 0 && <span className="badge dmg">-{u.damage}</span>}
         {u.buffed && <span className="badge buff">+1</span>}
         {u.stunned && <span className="badge">💫</span>}
         {u.combatRole && <span className="badge">{u.combatRole === 'attacker' ? '⚔️' : '🛡️'}</span>}
         {u.isChampion && <span className="badge">⭐</span>}
+        {u.isToken && <span className="badge">🎟</span>}
       </div>
       {tool}
     </div>
@@ -859,16 +1147,22 @@ function HintBox({ state, me }: { state: GameState; me: PlayerIx }) {
         "🃏 Mulligan : tu peux renvoyer jusqu'à 2 cartes de ta main (elles retournent sous ton deck) et en piocher autant. Garde des cartes peu chères (coût 1-3) pour bien démarrer."
       )
     else hints.push('En attente du mulligan adverse…')
-  } else if (state.chain.length > 0) {
-    const top = state.chain[state.chain.length - 1]
-    if (state.chainPasses >= 2) {
+  } else if (state.pending) {
+    if (state.pending.player === me) {
+      const k = state.pending.spec.kind
       hints.push(
-        top.controller === me
-          ? `🔗 À toi de résoudre « ${top.label} » : applique son texte (dégâts, pioche…) avec les outils 🔧 si besoin, puis clique Résoudre.`
-          : `🔗 ${state.players[top.controller].name} résout « ${top.label} ».`
+        k === 'assignDamage'
+          ? '💥 Répartis tes dégâts de combat : létal complet unité par unité (Tank en premier). Ajuste avec +/− puis Valider.'
+          : k === 'battlefield'
+            ? '🚩 Plusieurs affrontements sont possibles : clique le champ de bataille où commencer.'
+            : '👁 Vision : regarde la carte du dessus de ton deck — garde-la ou recycle-la sous le deck.'
       )
-    } else if (state.chainActive === me) {
-      hints.push('🔗 Un sort/déclencheur est sur la chaîne. Tu peux répondre avec une carte [Reaction] de ta main, ou cliquer Passer. Quand les deux joueurs passent, le dessus de la chaîne se résout.')
+    } else {
+      hints.push(`⏳ ${state.players[state.pending.player].name} fait un choix…`)
+    }
+  } else if (state.chain.length > 0) {
+    if (state.chainActive === me) {
+      hints.push('🔗 Un sort/déclencheur est sur la chaîne. Tu peux répondre avec une carte [Reaction] de ta main, ou cliquer Passer. Quand les deux joueurs passent, le dessus de la chaîne se résout automatiquement (applique son texte avec 🔧 si besoin).')
     } else {
       hints.push(`🔗 ${state.players[state.chainActive ?? 0].name} peut répondre à la chaîne.`)
     }
@@ -884,9 +1178,7 @@ function HintBox({ state, me }: { state: GameState; me: PlayerIx }) {
       hints.push(`⚔️ ${state.players[state.showdown.focus].name} a le focus : il peut jouer des [Action]/[Reaction] ou passer.`)
     }
   } else if (state.turnPlayer === me) {
-    if (state.pendingCombat.length > 0) {
-      hints.push('⚔️ Des unités ennemies et alliées partagent un champ de bataille : lance le combat (bouton rouge).')
-    } else {
+    {
       const readyRunes = my.runes.filter((r) => r.ready).length
       if (readyRunes > 0 && my.pool.energy === 0)
         hints.push('💠 Clique tes runes : ⚡ engager = 1 énergie (coût chiffré des cartes), ◆ recycler = 1 puissance (symboles colorés). La réserve se vide en fin de tour — dépense-la !')

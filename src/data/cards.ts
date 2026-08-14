@@ -22,7 +22,65 @@ export interface CardDef {
   tags: string[]
 }
 
-export const allCards = rawCards as CardDef[]
+/** Synthetic token cards absent from the Riftcodex export (referenced by effects). */
+const SYNTHETIC_TOKENS: CardDef[] = [
+  {
+    id: 'tok-mech',
+    name: 'Mech',
+    num: 0,
+    energy: null,
+    might: 3,
+    power: null,
+    type: 'Unit',
+    supertype: 'Token',
+    rarity: 'Token',
+    domains: [],
+    text: '',
+    flavour: null,
+    set: 'SFD',
+    setLabel: 'Spiritforged',
+    image: null,
+    tags: ['Mech'],
+  },
+  {
+    id: 'tok-bird',
+    name: 'Bird',
+    num: 0,
+    energy: null,
+    might: 1,
+    power: null,
+    type: 'Unit',
+    supertype: 'Token',
+    rarity: 'Token',
+    domains: [],
+    text: '[Deflect]',
+    flavour: null,
+    set: 'UNL',
+    setLabel: 'Unleashed',
+    image: null,
+    tags: ['Bird'],
+  },
+  {
+    id: 'tok-sandsoldier',
+    name: 'Sand Soldier',
+    num: 0,
+    energy: null,
+    might: 2,
+    power: null,
+    type: 'Unit',
+    supertype: 'Token',
+    rarity: 'Token',
+    domains: [],
+    text: '',
+    flavour: null,
+    set: 'SFD',
+    setLabel: 'Spiritforged',
+    image: null,
+    tags: ['Sand Soldier'],
+  },
+]
+
+export const allCards = [...(rawCards as CardDef[]), ...SYNTHETIC_TOKENS]
 
 export const cardsById = new Map<string, CardDef>(allCards.map((c) => [c.id, c]))
 

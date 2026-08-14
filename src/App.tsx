@@ -185,13 +185,13 @@ export default function App() {
     setStatus(null)
   }
 
-  const openReview = (config: GameConfig, log: GameAction[], name: string) => {
+  const openReview = (config: GameConfig, log: GameAction[], name: string, v: 1 | 2 = 2) => {
     meRef.current = 0
     setGame(null)
     setSoloHist({
       config,
       log,
-      states: replayStates(config, log),
+      states: replayStates(config, log, v),
       cursor: log.length,
       mode: 'review',
       id: makeGameId(),
@@ -203,8 +203,8 @@ export default function App() {
   const importGameFile = (file: File) => {
     file.text().then((text) => {
       try {
-        const { config, log, name } = parseImportedGame(text)
-        openReview(config, log, name ?? 'Partie importée')
+        const { config, log, name, v } = parseImportedGame(text)
+        openReview(config, log, name ?? 'Partie importée', v ?? 1)
       } catch (e) {
         alert('Import impossible : ' + (e instanceof Error ? e.message : 'fichier invalide'))
       }
@@ -427,7 +427,7 @@ export default function App() {
                   {g.result ?? `${g.log.length} actions`} · {new Date(g.savedAt).toLocaleString('fr-FR')}
                 </div>
               </div>
-              <button className="primary" onClick={() => openReview(g.config, g.log, g.name)}>
+              <button className="primary" onClick={() => openReview(g.config, g.log, g.name, g.v)}>
                 Revoir
               </button>
               <button

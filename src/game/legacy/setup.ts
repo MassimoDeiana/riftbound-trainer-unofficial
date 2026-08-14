@@ -1,5 +1,5 @@
 import { makeRng, nextInt, shuffle } from './rng'
-import type { Deck } from '../data/decks'
+import type { Deck } from '../../data/decks'
 import type { GameConfig, GameState, PlayerIx, PlayerState } from './types'
 import { STARTING_HAND } from './types'
 
@@ -18,7 +18,6 @@ function makePlayer(name: string, deck: Deck): PlayerState {
     name,
     points: 0,
     legendId: deck.legendId!,
-    legendReady: true,
     championId: deck.championId!,
     championInZone: true,
     deck: main,
@@ -71,13 +70,8 @@ export function createGame(config: GameConfig): GameState {
     chain: [],
     chainPasses: 0,
     chainActive: null,
-    chainOpener: null,
     showdown: null,
-    pending: null,
-    exec: null,
-    turnQueue: [],
-    onceUsed: {},
-    queuedTriggers: [],
+    pendingCombat: [],
     winner: null,
     log: [
       {
@@ -87,6 +81,5 @@ export function createGame(config: GameConfig): GameState {
       },
     ],
     cardsPlayedThisTurn: [0, 0],
-    discardsThisTurn: [0, 0],
   }
 }

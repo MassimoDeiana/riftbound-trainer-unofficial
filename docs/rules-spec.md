@@ -1,7 +1,8 @@
 # Riftbound Core Rules — Engine Specification
 
-Source: Riftbound Core Rules, Last Updated **2025-06-02** (65-page PDF, text extraction).
-Rule numbers in parentheses refer to the source document. Card text supersedes rules (Golden Rule, 002). In card effects, "card" means "Main Deck card"; runes, legends, and battlefields are not "cards" for card-effect purposes, but are cards for these rules (052).
+Source: Riftbound Core Rules, Last Updated **2026-07-16** (120-page PDF, text extraction; previous baseline 2025-06-02).
+Rule numbers in parentheses refer to the source document — the July 2026 revision renumbered several sections; where a rule kept its pre-2026 number it is left as-is, and renumbered sections carry the new numbers (Cleanups 318–324, Chains/FEPR 327–340, Showdowns 341–348, Combat 459–466, keywords 800+).
+Card text supersedes rules (Golden Rule, 002). In card effects, "card" means "Main Deck card"; runes, legends, and battlefields are not "cards" for card-effect purposes, but are cards for these rules (052).
 
 ---
 
@@ -100,15 +101,20 @@ Phases are rigid; actions within them may be ordered freely unless specified (50
   - **Showdown (any)**: only cards/abilities with **Action** or **Reaction** (508.1.a).
   - **Closed (any)**: only cards/abilities with **Reaction** (509.1.a).
 
-### 3.5 Cleanups (518–526)
-A Cleanup occurs: after a Chain item resolves; after a Move completes; after a Showdown completes; after a Combat completes (519). Cleanup steps:
-1. Kill every unit with nonzero marked damage ≥ its Might → owner's trash (520).
-2. Remove Attacker/Defender status from units no longer at the combat battlefield (521).
-3. Recognize/begin execution of outstanding state-based effects ("While"/"As long as") (522).
-4. Remove Hidden (facedown) cards from battlefields where their controller has no unit present → owner's trash; this can render the battlefield uncontrolled (523).
-5. Mark Combat as **Pending** at each battlefield containing units of two opposing players (524).
-6. If state is Neutral Open and one or more battlefields are Contested **with no current controller** → Turn Player chooses one; a **Showdown** begins there (525).
-7. If state is Neutral Open and Combat is Pending anywhere → Turn Player chooses one; **Combat** begins there (526).
+### 3.5 Cleanups (318–324, July 2026)
+A Cleanup occurs: after a Chain item resolves; after a Move completes; after a Showdown completes; after a Combat completes (319). If a Cleanup changes the game state, another Cleanup runs immediately, repeating until stable (322). Steps, in order (323):
+1. Victory check: a player at ≥ Victory Score with more points than any opponent wins (323.1).
+2. Sync Attacker/Defender designations: units present at the combat battlefield gain their controller's designation; units elsewhere lose theirs (323.2).
+3. Board state: **3a.** Deathknell/death-trigger abilities of lethally-damaged units trigger now (noting current location/attributes) → Pending Items; **3b.** all lethally-damaged units are killed → owner's trash (323.4–5).
+4. **Players lose control of any controlled battlefield without their units** occupying it, if the turn is in an Open State and no Showdown/Combat is ongoing there (323.6). Control is presence-based.
+5. Recall unattached non-Unit Gear/Runes at battlefields and permanents in other players' bases; remove facedown cards from every battlefield **not controlled by their owner** → owner's trash (323.7).
+6. Mark a **Showdown as Staged** at each Contested battlefield (stays staged while contester has units there) (323.8).
+7. Mark a **Combat as Staged** at each battlefield with units of two opposing players (323.9–10).
+8. Remove Contested where the applier has no units and no Showdown/Combat is ongoing; re-apply Contested where units sit at a battlefield their controller doesn't control (323.11).
+9. Neutral Open + Showdowns staged (at battlefields **without** a staged Combat) → Turn Player chooses one; a **Showdown** begins (323.12).
+10. Neutral Open + Combats staged → Turn Player chooses one; **Combat** begins (323.13). **10a.** A staged Combat at a battlefield with an ongoing non-combat Showdown converts it into a **Combat Showdown** (323.14).
+
+**Special Cleanups** (324): Combat Cleanup inserts "3c. Heal all Units" and "3d. Recall attackers if defenders still present" (466.1.a); the End-of-Turn Cleanup inserts heal-all / "this turn"-expiry / pool-emptying (317.2).
 
 ---
 
@@ -118,7 +124,7 @@ A Cleanup occurs: after a Chain item resolves; after a Move completes; after a S
 - Card cost = **Energy cost** (numeral) + optional **Power cost** (domain symbols) in top-left (130).
 - **Energy** is domainless/typeless; pays numeric costs (156.1). **Power** has a Domain; pays domain Power costs; some Power is **Universal** (any domain) (156.2).
 - The **Rune Pool** holds a player's floating Energy/Power (159). "Add" puts resources into the pool (605).
-- The Rune Pool **empties at the end of each player's Draw Phase and at the end of each player's turn** (all players' pools, both times) (160, 515.4.d, 517.2.c). Unspent resources are lost. It does NOT empty between actions within the Action Phase.
+- The Rune Pool **empties at the start of each Main Phase and during the Ending Phase's Expiration Step** (all players' pools, both times) (316.3, 317.2.d). Unspent resources are lost. It does NOT empty between actions within the Main Phase.
 
 ### 4.2 Runes (153–157, 606)
 - Rune Deck = exactly **12** runes. Runes are **channeled**, not played; they sit on the board (in the Base) but are not Permanents (132.5.a.1, 154.1.a).
@@ -179,12 +185,12 @@ A Cleanup occurs: after a Chain item resolves; after a Move completes; after a S
 - After a Move completes → **Cleanup** (615) (which may start Showdown/Combat).
 - **Recall** = location change that is not a Move: doesn't trigger move-triggers, can't be blocked by move-restrictions (616–618). Gear at a battlefield is recalled to its controller's Base at next Cleanup (144.3, 619).
 
-### 5.5 Hiding (597, 723)
-- Hide (Discretionary Action, via the **Hidden** keyword): pay **[C]** (1 Power matching your deck's Domain Identity — need not match the hidden card) to place the card facedown at a battlefield you control whose Facedown Zone is empty (723.1.b).
-- Hiding does **not** open a chain (723.1.c.2). Playing from hidden **does** (723.1.c.3).
-- Beginning on the **next player's turn**, the hidden card gains **Reaction** and may be played **ignoring its base cost**; all targets must be chosen at that battlefield (723.1.b). Cannot be played from hidden with no valid targets there (723.1.d.1).
-- A card with Hidden may always be played normally from hand instead (723.2).
-- If controller loses control of the battlefield, the facedown card goes to owner's trash during the next Cleanup (106.4.d, 523). Facedown cards put into Private/Secret zones (or at game end) are revealed (597.4).
+### 5.5 Hiding (421, 811)
+- Hide (Discretionary Action, via the **Hidden** keyword): pay **[A]** (**1 Power of ANY domain** — July 2026 wording, 811.1.b) to place the card facedown at a battlefield you control whose Facedown Zone is empty.
+- Hiding does **not** open a chain (811.1.c.2). Playing from hidden **does** (811.1.c.3).
+- Beginning on the **next turn**, the hidden card gains **Reaction** and may be played **ignoring its base cost**; a hidden permanent must be played to that battlefield (gear included — overrides gear-to-base, 811.1.d.1.a); spell/play-effect targets must be chosen at that battlefield unless the targeting restriction makes that impossible (811.1.d.2). Cannot be played from hidden with no valid targets under these restrictions.
+- A card with Hidden may always be played normally from hand instead.
+- Facedown cards are removed from every battlefield **not controlled by their owner** at Cleanup step 5 → owner's trash (323.7). Facedown cards that would change zones (or at game end) are revealed (421.4).
 
 ---
 
@@ -195,34 +201,28 @@ A Cleanup occurs: after a Chain item resolves; after a Move completes; after a S
 - **Contested**: temporary status applied when a unit whose controller doesn't control the battlefield moves/becomes present there (181.3.a). Lasts until control is (re-)established. Game effects cannot reference Contested (181.3.d).
 
 ### 6.2 When combat/showdowns start
-- **Combat** occurs when a Cleanup finds units of two opposing players at a battlefield, chain empty (621, 524, 526). Turn Player picks the order if multiple are pending (622.1). Pending combats that stop being pending never happen (622.2). Combat is strictly two-player (623).
-- **Showdown without combat**: a move contests an **uncontrolled/empty** battlefield → standalone Showdown at the Cleanup after that move (516.5.b, 548.2, 613).
+- **Combat** occurs when a Cleanup finds a staged Combat (units of two opposing players at a battlefield), chain empty, no other showdown/combat ongoing (460–461). Turn Player picks the order if multiple are staged (461.1). Staged combats that stop being staged never happen (461.2). Combat is strictly two-player (462).
+- **Showdown without combat**: a move contests an **uncontrolled/empty** battlefield → standalone Showdown at the Cleanup after that move (316.8.b.1, 323.12).
 
-### 6.3 Showdown procedure (545–553)
-- Relevant Players: for combat showdowns, the Attacker and Defender; for non-combat showdowns, all players (550). Once relevant, relevant until the Showdown ends (530). Additional players can become Relevant (triggers, invitations).
-- The player who applied Contested status gains **Focus** as the Showdown begins (549). Focus ⇒ Priority (513.2); passing Priority keeps Focus (513.3).
-- Initial Chain (combat showdowns): "When I attack" / "When I defend" triggers go on the chain — Focus player first, then other Relevant Players in Turn Order (551.1). If none, Showdown proceeds Open (551.1.b).
-- The Focus player may (553): play a legally-timed spell (starts a Chain; only Action/Reaction cards are legal in a Showdown), activate a legally-timed ability, **Invite** another player (invitee gains Focus), or **Pass**.
-- Passing: Focus passes to the next Relevant Player in Turn Order. When **all Relevant Players pass once in sequence**, the Showdown ends → Cleanup (553.4).
-- When the last chain item resolves during a Showdown, Focus passes; next Relevant Player gains Focus+Priority (552).
+### 6.3 Showdown procedure (341–348)
+- A Showdown is a Window of Opportunity where players may play Action/Reaction cards in alternating fashion; each play creates a Chain as normal (342).
+- The player who applied Contested status gains **Focus** as the Showdown begins (345). Focus ⇒ Priority (313.2); passing Priority retains Focus (313.3).
+- The Focus player may (347): play a legally-timed card/activated ability (starts a Chain; **when that Chain closes, Focus passes**), or **Pass**.
+- Passing: Focus passes to the next player in Turn Order. When **all players pass once in sequence**, the Showdown closes (348).
+- **346.1 (critical):** Focus does **not** pass when the emptying chain was opened by a **triggered ability** or an **Add ability** — only play-opened chains pass Focus.
+- Non-combat Showdown close (348.2): if only one player's units remain and they don't already control the battlefield, they **establish Control** (→ Conquer if not yet scored this turn).
 
-### 6.4 Steps of Combat (624–628)
-1. **Showdown Step** (625):
-   - Attacker = the player who applied Contested; Defender = the other (625.1.a).
-   - Modulate Might from static combat keywords now: **Assault X** for attackers, **Shield X** for defenders (625.1.b).
-     > ⚠️ UNCERTAIN: extraction merges 625.1.b lines ("The Defender is the player who did not apply the Contested status … Modulate Unit Might now"); intent (Assault/Shield apply at this step) is clear from 625.1.b.1–2.
-   - Build Initial Chain of attack/defend triggers (closes state if any exist); Attacking Player becomes Active Player; play proceeds as a Showdown (625.1.c–f).
-2. **Combat Damage Step** (626) — occurs when the Showdown closes, and **only if both attacking and defending units remain** (626.1.a). If neither side remains, "no combat occurred" → skip to Cleanup.
-   - Sum Might of all attacking units; sum Might of all defending units (Stunned units contribute 0, 599.1.b).
-   - **Starting with the Attacker**, each player distributes damage equal to their summed Might among the opponent's units (626.1.d). (Damage is dealt both ways in the same step.)
-   - Assignment rules: units with **Tank** must be assigned lethal damage first (626.1.d.1); each unit must receive **full lethal damage before any damage goes to the next unit** (626.1.d.2); obey all assignment requirements if able; equal-priority requirements → assigning player chooses order (626.1.d.3–4). Lethal = nonzero damage ≥ Might.
-3. **Resolution Step** (627):
-   1. Kill units with lethal damage marked (627.1).
-   2. If both attacking and defending units still remain → **attackers are Recalled** to base (627.2) (defenders held).
-   3. If **no defenders remain but attackers do** → battlefield is **Conquered**: control changes to attacker, triggering a Conquer score (627.3).
-   4. Clear Contested from the battlefield (627.4).
-   5. **Clear all marked damage from all units at all locations** (627.5).
-4. **Perform a Cleanup** (628).
+### 6.4 Steps of Combat (459–466)
+1. **Combat Showdown Step** (464): start-of-combat effects → establish **Attacker** (applied Contested) and **Defender**; units gain designations; **Attacker gains Focus**; attack/defend triggers go on the Combat Chain — Focus/attacking player's first, defender's last (464.2.e.1). The state closes if a Combat Chain was created; otherwise the Combat Showdown proceeds Open.
+2. **Combat Damage Step** (465) — when the Showdown closes, and **only if both attacking and defending units remain** (465.1).
+   - Sum Might of all attacking units; sum Might of all defending units (Stunned units contribute 0).
+   - **Starting with the Attacker, each player CHOOSES the assignment** of damage equal to their summed Might among the opponent's units (465.2.c) — this is a player decision, not automatic. Assigning ≠ dealing; when all damage is assigned it is dealt **simultaneously** (465.2.c.1, 465.2.d).
+   - Assignment constraints: full lethal per unit before moving to the next (465.2.c.3); no over-assignment beyond minimum lethal while other units remain (465.2.c.4); replacement effects apply at assignment time (465.2.c.5); **Tank** assigned first / **Backline** last (465.2.c.6); equal-priority units in any order (465.2.c.7); exclusionary requirements (e.g. Tank+Backline) → assigner picks one (465.2.c.8–9); undamageable units are exempt (465.2.c.10).
+   - Then skip FEPR, cancel outstanding tasks, proceed to Resolution (465.3).
+3. **Resolution Step** (466):
+   1. **Combat Cleanup** (466.1): normal Cleanup (kills lethals, Deathknell triggers) **plus** inserted steps "3c. **Heal all Units**" and "3d. **Recall attackers** at the battlefield if defenders are still present".
+   2. Determine Combat Result (466.3): winner = only designated player with units remaining; "No Result" if attackers were recalled at 3d, or both/neither side has units. No Result with both sides present → stage a Showdown + Combat there again.
+   3. If no Showdown/Combat staged here: the player with units remaining **establishes Control** (→ Conquer if not scored this turn); clear Contested; no units → uncontrolled; facedown cards not sharing a controller are removed (466.5).
 
 ### 6.5 Scoring & victory (629–633)
 - Two score methods (630):
@@ -246,22 +246,20 @@ A Cleanup occurs: after a Chain item resolves; after a Move completes; after a S
 - Priority is received: (a) Neutral Open during your own Action Phase; (b) in a Showdown when you gain Focus; (c) in a Closed State when you control the next item to resolve on the Chain; (d) in a Closed State when the priority-holder passes and you are the next Relevant Player in Turn Order (512.2).
 - No Focus exists in Neutral States (513.4).
 
-### 7.2 Chain mechanics (532–544)
-- The Chain is created whenever a card/token is played or an ability activated (537). Only one Chain at a time; new plays stack onto the existing Chain (534).
-- The chain-creating player becomes the first **Active Player** (537.1).
-- **Permanents skip response windows**: if the card that initiated the Chain is a permanent, no player receives priority before it resolves (538).
-- Loop (539–542): define/redefine Relevant Players, then the Active Player may:
-  1. Play a legally-timed spell (in a Closed State that means a **Reaction**) → added to the Chain.
-  2. Activate a legally-timed ability.
-  3. **Invite** a non-Relevant player (Limited Action). Invitee may refuse (stays non-relevant); if they accept they **must** play/activate something legal now, become Relevant for the whole Chain/Showdown, and become Active Player (531.2).
-  4. **Pass** → next Relevant Player in Turn Order becomes Active. When **all Relevant Players have passed once in sequence**, the Chain closes to additions (540.4.b).
-- Triggered abilities that fire during a Chain are added as the **most recent** (top) item; their controller becomes Relevant if not already; Active Player order unaffected (541).
-- **Resolution** (543–544): resolve the **last-added** item; spells → owner's trash; permanents → board at chosen location (not a Move); abilities cease to exist. Then "when a card is played" triggers fire (added on top of the current Chain, or start a new Chain if it emptied) (543.2). **Perform a Cleanup** (543.3). Then the controller of the new topmost item becomes Active Player, and **all Relevant Players must pass again** before the next item resolves (543.4). Repeat until Chain empty.
+### 7.2 Chain mechanics — HOT FEPR (327–340, July 2026)
+- The Chain is a temporary Non-Board Zone existing whenever a card is played or ability activated (328). Only one Chain at a time; new plays stack onto it (330). Items are **Pending** until the "Check Legality" step of their play completes, then **Finalized** (329).
+- **HOT FEPR** (334): **H**andle **O**utstanding **T**asks, then **F**inalize → **E**xecute → **P**ass → **R**esolve:
+  1. **Finalize** (337): the controller of the **oldest Pending** item completes its play steps (choices/costs/legality). Finalizing does not pass priority. **Units, Gear, and Add-resource abilities resolve immediately after finalizing** (337.2) — no response window (their play triggers do chain). When nothing is Pending, **the controller of the newest item on the chain gains Priority** (337.4) — the caster may stack a second item before anyone else responds (338.1.a.5).
+  2. **Execute** (338): the priority holder may play a legally-timed card/ability (in a Closed State: **Reaction** only) → new Pending item → back to Finalize; or pass.
+  3. **Pass** (339): if all players passed in sequence without adding, → Resolve; else priority to the next player in Turn Order → Execute.
+  4. **Resolve** (340): the **newest Finalized** item resolves entirely (spell → owner's trash). Chain empty → Open State (Focus passes per 346/346.1 during Showdowns). Chain non-empty → priority to the newest item's controller; all players must pass again before the next item resolves. A **Cleanup** runs after each item resolves (319).
 
-### 7.3 Triggered abilities (582–585)
-- Format "When/At [condition], [effect]". When the condition fires, the ability goes on the Chain (works in Open or Closed states, on any player's turn) (583.3.a).
-- Simultaneous triggers: single controller orders their own; multiple controllers order theirs starting with the Turn Player, in Turn Order (583.3.b).
-- Permanents' triggers only evaluate while on the Board (584.2); off-board triggers self-describe their zone (585).
+### 7.3 Triggered abilities (382–393)
+- Format "When/At [condition], [effect]". When the condition fires, the ability goes on the Chain as a Pending item (works in Open or Closed states, on any player's turn).
+- Simultaneous triggers: a single controller orders their own; multiple controllers place them starting with the **Turn Player**, in Turn Order (383.3.d). In combat trigger placement, the **Focus/attacking player places first, defender last** (464.2.e.1).
+- Optional ("you may") triggers are declined/accepted at finalization; once-per-turn triggers track their uses (383.3.e).
+- **Deathknell (808)**: the trigger goes on the chain **before** the card moves to the trash, noting its location/attributes; if the death is replaced, the trigger is removed.
+- Permanents' triggers only evaluate while on the Board; off-board triggers self-describe their zone (385).
 
 ### 7.4 Replacement effects & layers (571–575, 634–639)
 - Replacement effects ("instead") intercede in an event's execution. Multiple replacements on the same event: the **owner of the affected object** orders them (affected player if a player; Turn Player if an uncontrolled battlefield) (575).
@@ -290,6 +288,21 @@ Unit/permanent keywords:
 - **Vision** — Triggered: "When this is played (enters the Board), look at the top card of your Main Deck. You may recycle it." Multiple instances trigger separately (729).
 
 Keyword rules: grants without a stated duration last while the object stays on the Board / in its current non-board zone (713.3.a.3); same for removals (713.3.b.2).
+
+### 8.1 Keywords added by Spiritforged / Unleashed (July 2026 rules — engine scope M1+)
+- **Equip [Cost]** (818) — Activated Ability on Gear with the Equipment tag: pay [Cost] → **Attach** this to a chosen Unit (the choice is a Target; the Unit becomes Top-Most Card). Equipment rules text is **Inactive** unless attached (720).
+- **Quick-Draw** (819) — on Gear with Equip: inherently **[Reaction]**, and "When you play this, attach it to a Unit you control."
+- **Repeat [Cost]** (820) — Optional Additional Cost on Spells/Abilities: pay to execute the effect a second time (re-choosing targets); multiple instances individually payable.
+- **Weaponmaster** (821) — Play effect: choose an Equipment you control, pay its Equip cost at a discount, attach it to this unit (ignores usual Equip timing).
+- **Ambush** (822) — Passive: "I may be played to a battlefield where you control Units" + "[Reaction] while being played that way."
+- **Hunt X** (823) — Conquer/Hold-linked: grants **XP**; granted Hunt values sum (X omitted = 1).
+- **Level N** (824) — Dependent keyword: "[Level N][>] [Text]" — text active while your **XP ≥ N**.
+- **Unique** (825) — deckbuilding restriction only (max 1 copy).
+- **Backline** (826) — "I must be assigned combat damage **last**" (mirror of Tank; see 465.2.c.6–9).
+- **Empower [Cost] / Empowered** (827–828) — Activated: "[Cost]: Empower this. Play only if not Empowered." Empowered is a persistent status other abilities depend on.
+- **Flow** (829) — alternate play permission from the **trash** for an alternate cost, then banish.
+- **XP** (728–733) — an unbounded per-player resource; **Counters** (741–745) — game objects on permanents that can carry effects and be spent.
+- **Additional turns** (734–738) — queued turns; "the next player with their Turn queued becomes the Turn Player" (317.3).
 
 ---
 
@@ -322,7 +335,7 @@ Keyword rules: grants without a stated duration last while the object stays on t
 - **Friendly** (648.8.d): controlled by you (or teammate in team modes).
 - **Hide / Hidden** (597, 723): facedown placement at a controlled battlefield (see §5.5).
 - **Hold** (630.2): score by controlling a battlefield during your Beginning Phase.
-- **Invite** (531.2): active/focus player offers a non-relevant player the chance to act; acceptance obligates action.
+- ~~**Invite**~~: removed from the July 2026 rules (0 occurrences; no card references it). Team-mode play permissions are handled directly by 316.5.b.1.
 - **Kill** (604): permanent goes board → trash (active by instruction, or passive via lethal damage). Only "Killed" if it came from the board. Not a Move.
 - **Lethal Damage** (626.1.d.1.a): nonzero damage ≥ a unit's Might.
 - **Location** (106): a Base or a battlefield. Legend Zone and Facedown Zones are NOT locations.
@@ -349,10 +362,10 @@ Keyword rules: grants without a stated duration last while the object stays on t
 8. **Mistargeted checks return 0/null** (563.2.c.8): e.g. Last Breath readying a removed unit deals 0 damage — the rest of the spell still executes.
 9. **Final point gate**: at 7 points (1v1), a Conquer only wins if the player scored *every* battlefield this turn; otherwise it converts to a card draw. Hold and non-score point sources (Burn Out) ignore the gate (632.1).
 10. **Score once per battlefield per turn** applies across both methods (Hold then re-Conquer of the same battlefield that turn scores nothing) (631).
-11. **Combat damage is fully simultaneous but assigned in Attacker-then-Defender order**, with mandatory full-lethal per unit and Tank-first ordering (626.1.d); no partial chip-spreading allowed.
-12. **Combat Damage Step is skipped entirely if either side's units are all gone** when the Showdown closes (626.1.a) — showdown removal (kills/moves) can void combat; attackers left alone then conquer at Resolution.
-13. **If both sides survive combat, the ATTACKERS are recalled** (627.2) — a recall, not a move: no move triggers, and it bypasses movement restrictions (618).
-14. **All damage on all units everywhere is cleared at the end of any combat** (627.5), not just at the combat battlefield.
+11. **Combat damage assignment is a PLAYER CHOICE** (attacker chooses first, then defender), dealt simultaneously afterwards — mandatory full-lethal per unit, no over-assignment while units remain, Tank-first / Backline-last, exclusionary conflicts resolved by the assigner (465.2.c). The engine prompts only when more than one legal assignment exists.
+12. **Combat Damage Step is skipped entirely if either side's units are all gone** when the Showdown closes (465.1) — showdown removal (kills/moves) can void combat; attackers left alone then conquer at Resolution.
+13. **If defenders are still present after the kills, the ATTACKERS are recalled** during the Combat Cleanup (466.1.a "3d") — a recall, not a move: no move triggers, bypasses movement restrictions.
+14. **All units everywhere are HEALED by the Combat Cleanup** (466.1.a "3c"), not just at the combat battlefield.
 15. **End-of-turn loop**: if the Expiration/Cleanup steps generate new damage or new "this turn" effects, return to the Expiration Step and repeat (517.4).
 16. **Hidden-card cleanup**: facedown cards are trashed at Cleanup whenever their controller has no unit at that battlefield (523) — this itself can flip the battlefield to uncontrolled.
 17. **Deflect is a mandatory additional Power cost of any domain**, applied per choose-effect during cost determination — countering or fizzling never refunds it (721, 601.1.c).
@@ -360,4 +373,6 @@ Keyword rules: grants without a stated duration last while the object stays on t
 19. **Split damage**: number of targets locked at play time (≤ initial damage, ≥1 each), division decided at resolution; too few damage points at resolution → controller drops targets, but on-choose triggers stay triggered (559.3.d).
 20. **Deterministic-illegality guard**: choices (559.5) and cost payments (561.3) may not knowingly create later illegality in the same play process (e.g. killing your only unit at the battlefield you're playing to); on failed legality check (562.3), the entire play is undone.
 21. **Burn Out from an empty trash loops**, giving the chosen opponent 1 point per iteration until someone wins (607.3.a) — an engine must handle this terminating loop.
-22. **Invited players who accept MUST act** (play/activate something legal) and become the Active/Focus player; refusing keeps them non-relevant (531.2).
+22. **Control of a battlefield is presence-based and drops at Cleanup**: a controller with no units at the battlefield loses control during any Open-State cleanup with no showdown/combat ongoing there (323.6) — Holding requires a garrison across your whole turn cycle.
+23. **Priority after a play goes to the CASTER first** (337.4, 338.1.a.5): the newest item's controller may stack a second card before the opponent may respond; resolution needs all players to pass in sequence.
+24. **Focus does not pass when a trigger-opened (or Add-opened) chain empties during a showdown** (346.1) — only play-opened chains pass focus.

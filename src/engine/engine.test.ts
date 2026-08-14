@@ -5,7 +5,9 @@ import { createGame } from './setup'
 import type { GameAction, GameState } from './types'
 
 // Test cards (real data from cards.json):
-const LEGEND = 'opp-017-024' // Annie - Dark Child (Fury/Chaos)
+// NB: the legend must be unscripted so turn transitions stay trigger-free here
+// (scripted-legend flows are covered by the effect-engine tests).
+const LEGEND = 'ogn-253-298' // Darius - Hand of Noxus (Fury/Body)
 const CHAMP = 'opp-001-024' // Annie - Fiery, 5E 1P, Might 4
 const ENFORCER = 'ogn-003-298' // Chemtech Enforcer, 2E, M2, [Assault 2] + "When you play me, discard 1."
 const REARGUARD = 'ogn-010-298' // Legion Rearguard, 2E, M2, [Accelerate], no trigger
@@ -126,15 +128,16 @@ describe('runes & costs', () => {
     expect(s.chain.length).toBe(0) // no played-trigger on Rearguard
   })
 
-  it('"When you play me" triggers go on the chain and resolve manually', () => {
+  it('"When you play me" triggers go on the chain and resolve after both pass', () => {
     let s = skipMulligans(newGame({ mainA: ENFORCER }))
     s = addEnergy(s, 0, 2)
     s = run(s, { t: 'playCard', player: 0, cardId: ENFORCER, from: 'hand', location: 'base' })
     expect(s.chain.length).toBe(1)
     expect(s.chain[0].kind).toBe('trigger')
-    expect(s.chainActive).toBe(1) // opponent may respond
-    s = run(s, { t: 'pass', player: 1 }, { t: 'pass', player: 0 })
-    s = run(s, { t: 'resolveChainTop', player: 0 })
+    // 337.4: priority goes to the newest item's controller first
+    expect(s.chainActive).toBe(0)
+    s = run(s, { t: 'pass', player: 0 }, { t: 'pass', player: 1 })
+    // Both passed in sequence: the trigger resolves automatically (339-340)
     expect(s.chain.length).toBe(0)
   })
 })
@@ -227,6 +230,161 @@ describe('combat', () => {
   })
 })
 
+describe('presence-based control (323.6)', () => {
+  it('control is lost when the controller has no units at the battlefield', () => {
+    let s = skipMulligans(newGame())
+    s = addEnergy(s, 0, 2)
+    s = run(s, { t: 'playCard', player: 0, cardId: REARGUARD, from: 'hand', location: 'base' })
+    s = run(s, { t: 'endTurn', player: 0 }, { t: 'endTurn', player: 1 })
+    const uid = s.units[0].uid
+    s = run(
+      s,
+      { t: 'move', player: 0, unitUids: [uid], to: 0 },
+      { t: 'pass', player: 0 },
+      { t: 'pass', player: 1 }
+    )
+    expect(s.battlefields[0].controller).toBe(0)
+    expect(s.players[0].points).toBe(1)
+    // Leave: next turn, move the unit back to base → control drops at cleanup
+    s = run(s, { t: 'endTurn', player: 0 }, { t: 'endTurn', player: 1 })
+    expect(s.players[0].points).toBe(2) // held while garrisoned
+    const unit = s.units[0]
+    s = run(s, { t: 'move', player: 0, unitUids: [unit.uid], to: 'base' })
+    expect(s.battlefields[0].controller).toBeNull()
+    // No garrison → no hold next turn
+    s = run(s, { t: 'endTurn', player: 0 }, { t: 'endTurn', player: 1 })
+    expect(s.players[0].points).toBe(2)
+  })
+})
+
+describe('combat damage assignment (465.2.c)', () => {
+  /** Bob garrisons two Skulkers on battlefield 0; Alice attacks with a Scorcher. */
+  function twoDefenders(): GameState {
+    let s = skipMulligans(newGame({ mainA: SCORCHER, mainB: SKULKER }))
+    s = run(s, { t: 'endTurn', player: 0 })
+    // t2 Bob: play two Skulkers (3E each)
+    s = run(s, { t: 'manual', player: 1, op: { k: 'energy', who: 1, n: 6 } })
+    s = run(s, { t: 'playCard', player: 1, cardId: SKULKER, from: 'hand', location: 'base' })
+    s = run(s, { t: 'playCard', player: 1, cardId: SKULKER, from: 'hand', location: 'base' })
+    s = run(s, { t: 'endTurn', player: 1 }, { t: 'endTurn', player: 0 })
+    // t4 Bob: move both to battlefield 0, conquer through the showdown
+    const skulkers = s.units.filter((u) => u.cardId === SKULKER).map((u) => u.uid)
+    s = run(
+      s,
+      { t: 'move', player: 1, unitUids: skulkers, to: 0 },
+      { t: 'pass', player: 1 },
+      { t: 'pass', player: 0 },
+      { t: 'endTurn', player: 1 }
+    )
+    expect(s.battlefields[0].controller).toBe(1)
+    // t5 Alice: play the Scorcher (5E)
+    s = run(s, { t: 'manual', player: 0, op: { k: 'energy', who: 0, n: 5 } })
+    s = run(s, { t: 'playCard', player: 0, cardId: SCORCHER, from: 'hand', location: 'base' })
+    s = run(s, { t: 'endTurn', player: 0 }, { t: 'endTurn', player: 1 })
+    // t7 Alice: attack — combat begins automatically
+    const scorcher = s.units.find((u) => u.cardId === SCORCHER)!
+    s = run(s, { t: 'move', player: 0, unitUids: [scorcher.uid], to: 0 })
+    expect(s.showdown).not.toBeNull()
+    expect(s.showdown!.defender).toBe(1)
+    s = run(s, { t: 'pass', player: 0 }, { t: 'pass', player: 1 })
+    return s
+  }
+
+  it('suspends on a real assignment choice, validates, and deals simultaneously', () => {
+    let s = twoDefenders()
+    // 5 damage among two 3-Might Skulkers: a genuine choice → pending for Alice
+    expect(s.pending).not.toBeNull()
+    expect(s.pending!.player).toBe(0)
+    expect(s.pending!.spec.kind).toBe('assignDamage')
+    const spec = s.pending!.spec as Extract<GameState['pending'], { spec: { kind: 'assignDamage' } }>['spec']
+    expect(spec.pool).toBe(5)
+    expect(spec.targets.length).toBe(2)
+    const [d1, d2] = spec.targets
+    // Illegal: partial damage on both (465.2.c.3)
+    expect(() =>
+      applyAction(s, {
+        t: 'choose',
+        player: 0,
+        choice: { kind: 'assignDamage', assignments: { [d1]: 1, [d2]: 4 } },
+      })
+    ).toThrow(IllegalAction)
+    // Other actions are locked while the choice is pending
+    expect(() => applyAction(s, { t: 'endTurn', player: 0 })).toThrow(IllegalAction)
+    // Legal: full lethal (3) on one, remainder (2) on the other
+    s = applyAction(s, {
+      t: 'choose',
+      player: 0,
+      choice: { kind: 'assignDamage', assignments: { [d1]: 3, [d2]: 2 } },
+    })
+    // Defenders' 6 damage auto-assigned to the lone Scorcher (kills it);
+    // one Skulker dies, the survivor is healed by the Combat Cleanup.
+    expect(s.pending).toBeNull()
+    expect(s.units.filter((u) => u.cardId === SKULKER).length).toBe(1)
+    expect(s.units.find((u) => u.cardId === SCORCHER)).toBeUndefined()
+    expect(s.units[0].damage).toBe(0)
+    expect(s.battlefields[0].controller).toBe(1) // defenders held
+  })
+})
+
+describe('combat resolution (466)', () => {
+  it('recalls the attackers when both sides survive', () => {
+    let s = skipMulligans(newGame({ mainA: REARGUARD, mainB: SKULKER }))
+    s = run(s, { t: 'endTurn', player: 0 })
+    s = run(s, { t: 'manual', player: 1, op: { k: 'energy', who: 1, n: 3 } })
+    s = run(s, { t: 'playCard', player: 1, cardId: SKULKER, from: 'hand', location: 'base' })
+    s = run(s, { t: 'endTurn', player: 1 }, { t: 'endTurn', player: 0 })
+    const skulker = s.units.find((u) => u.cardId === SKULKER)!
+    s = run(
+      s,
+      { t: 'move', player: 1, unitUids: [skulker.uid], to: 0 },
+      { t: 'pass', player: 1 },
+      { t: 'pass', player: 0 },
+      { t: 'endTurn', player: 1 }
+    )
+    // t5 Alice: play Rearguard (M2), then attack the stunned Skulker (M3) next turn
+    s = run(s, { t: 'manual', player: 0, op: { k: 'energy', who: 0, n: 2 } })
+    s = run(s, { t: 'playCard', player: 0, cardId: REARGUARD, from: 'hand', location: 'base' })
+    s = run(s, { t: 'endTurn', player: 0 }, { t: 'endTurn', player: 1 })
+    const rearguard = s.units.find((u) => u.cardId === REARGUARD)!
+    // Stun the defender: it deals 0 combat damage but still needs 3 to die
+    s = run(s, { t: 'manual', player: 0, op: { k: 'stun', unitUid: skulker.uid } })
+    s = run(s, { t: 'move', player: 0, unitUids: [rearguard.uid], to: 0 })
+    s = run(s, { t: 'pass', player: 0 }, { t: 'pass', player: 1 })
+    // 2 damage < 3 Might: both survive → attackers recalled, defender keeps control
+    const rg = s.units.find((u) => u.cardId === REARGUARD)!
+    expect(rg.location).toBe('base')
+    expect(s.units.find((u) => u.cardId === SKULKER)!.location).toBe(0)
+    expect(s.battlefields[0].controller).toBe(1)
+  })
+})
+
+describe('hide (811)', () => {
+  const TIDETURNER = 'ogn-199-298' // [Hidden] unit
+
+  it('hiding costs 1 power of ANY domain and sets the facedown card', () => {
+    let s = skipMulligans(newGame({ mainA: TIDETURNER }))
+    s = run(s, { t: 'manual', player: 0, op: { k: 'energy', who: 0, n: 3 } })
+    s = run(s, { t: 'playCard', player: 0, cardId: TIDETURNER, from: 'hand', location: 'base' })
+    // Tideturner's play trigger chains; both pass to resolve it
+    if (s.chain.length > 0) s = run(s, { t: 'pass', player: 0 }, { t: 'pass', player: 1 })
+    s = run(s, { t: 'endTurn', player: 0 }, { t: 'endTurn', player: 1 })
+    const unit = s.units[0]
+    s = run(
+      s,
+      { t: 'move', player: 0, unitUids: [unit.uid], to: 0 },
+      { t: 'pass', player: 0 },
+      { t: 'pass', player: 1 }
+    )
+    expect(s.battlefields[0].controller).toBe(0)
+    // Off-identity power (Body, not Fury/Chaos) is a legal Hide payment
+    s = run(s, { t: 'manual', player: 0, op: { k: 'power', who: 0, domain: 'Body', n: 1 } })
+    s = run(s, { t: 'hide', player: 0, cardId: TIDETURNER, battlefield: 0 })
+    expect(s.battlefields[0].facedown).not.toBeNull()
+    expect(s.battlefields[0].facedown!.owner).toBe(0)
+    expect(s.players[0].pool.power.Body ?? 0).toBe(0)
+  })
+})
+
 describe('scoring edge rules', () => {
   function playParked(): GameState {
     let s = skipMulligans(newGame())
@@ -271,17 +429,26 @@ describe('scoring edge rules', () => {
 })
 
 describe('spells & the chain', () => {
-  it('a spell goes on the chain, both pass, controller resolves it to trash', () => {
+  it('a spell goes on the chain; both passing resolves it to the trash', () => {
     let s = skipMulligans(newGame({ mainA: CLEAVE }))
     s = run(s, { t: 'manual', player: 0, op: { k: 'energy', who: 0, n: 2 } })
     const spell = s.players[0].hand.find((c) => c === CLEAVE)!
     s = run(s, { t: 'playCard', player: 0, cardId: spell, from: 'hand' })
     expect(s.chain.length).toBe(1)
+    // Caster holds priority first (337.4) and may stack another card
+    expect(s.chainActive).toBe(0)
+    s = run(s, { t: 'pass', player: 0 })
     expect(s.chainActive).toBe(1)
-    s = run(s, { t: 'pass', player: 1 }, { t: 'pass', player: 0 })
-    expect(s.chainPasses).toBe(2)
-    s = run(s, { t: 'resolveChainTop', player: 0 })
+    s = run(s, { t: 'pass', player: 1 })
+    // All passed: automatic resolution, spell to its controller's trash
     expect(s.chain.length).toBe(0)
     expect(s.players[0].trash).toContain(CLEAVE)
+  })
+
+  it('a reaction window: only the priority holder may pass', () => {
+    let s = skipMulligans(newGame({ mainA: CLEAVE }))
+    s = run(s, { t: 'manual', player: 0, op: { k: 'energy', who: 0, n: 2 } })
+    s = run(s, { t: 'playCard', player: 0, cardId: CLEAVE, from: 'hand' })
+    expect(() => applyAction(s, { t: 'pass', player: 1 })).toThrow(IllegalAction)
   })
 })

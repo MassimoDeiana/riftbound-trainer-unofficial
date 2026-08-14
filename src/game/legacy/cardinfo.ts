@@ -1,11 +1,5 @@
-import { cardsById, keywordsOf, type CardDef, type Domain } from '../data/cards'
-import { scriptFor } from '../effects/registry'
+import { cardsById, keywordsOf, type CardDef, type Domain } from '../../data/cards'
 import type { GameState, UnitEntity } from './types'
-
-/** Registry keyword override: null = no override, use the text parse. */
-function scriptKeywordOverride(cardId: string): string[] | null {
-  return scriptFor(cardId)?.keywords ?? null
-}
 
 export function def(cardId: string): CardDef {
   const c = cardsById.get(cardId)
@@ -16,7 +10,6 @@ export function def(cardId: string): CardDef {
 export interface Keywords {
   action: boolean
   reaction: boolean
-  hunt: number
   accelerate: boolean
   assault: number
   shield: number
@@ -35,9 +28,6 @@ export interface Keywords {
 const KNOWN = [
   'action',
   'reaction',
-  'hunt',
-  'quick-draw',
-  'quickdraw',
   'accelerate',
   'assault',
   'shield',
@@ -57,15 +47,10 @@ export function keywords(cardId: string): Keywords {
   let kw = kwCache.get(cardId)
   if (kw) return kw
   const card = def(cardId)
-  // A script may override the printed keywords (conditional-text brackets).
-  // Lazy import to avoid a module cycle at load time.
-  let raw = keywordsOf(card)
-  const override = scriptKeywordOverride(cardId)
-  if (override !== null) raw = override
+  const raw = keywordsOf(card)
   kw = {
     action: false,
     reaction: false,
-    hunt: 0,
     accelerate: false,
     assault: 0,
     shield: 0,
@@ -123,13 +108,6 @@ export function keywords(cardId: string): Keywords {
         break
       case 'deflect':
         kw.deflect += x
-        break
-      case 'hunt':
-        kw.hunt += x
-        break
-      case 'quick-draw':
-      case 'quickdraw':
-        kw.reaction = true
         break
       default:
         if (!KNOWN.includes(name)) kw.unknown.push(k)

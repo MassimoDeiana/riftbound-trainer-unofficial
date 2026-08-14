@@ -1,5 +1,6 @@
 import type { Domain } from '../data/cards'
 import { def, keywords, unitMight, unitsAt } from '../engine/cardinfo'
+import { defaultAssignment } from '../engine/core'
 import type { GameAction, GameState, PlayerIx } from '../engine/types'
 
 /**
@@ -13,6 +14,35 @@ export function botAction(s: GameState, me: PlayerIx): GameAction | null {
   const my = s.players[me]
   const opp: PlayerIx = me === 0 ? 1 : 0
 
+  // --- pending choice addressed to the bot: answer deterministically
+  if (s.pending !== null) {
+    if (s.pending.player !== me) return null
+    const spec = s.pending.spec
+    switch (spec.kind) {
+      case 'assignDamage':
+        return { t: 'choose', player: me, choice: { kind: 'assignDamage', assignments: defaultAssignment(s) } }
+      case 'battlefield':
+        return { t: 'choose', player: me, choice: { kind: 'battlefield', battlefield: spec.options[0] } }
+      case 'vision':
+        return { t: 'choose', player: me, choice: { kind: 'vision', recycle: false } }
+      case 'unit': {
+        // Greedy: prefer enemy units (targets are usually removal), stable order.
+        const enemies = spec.legal.filter((uid) => s.units.find((u) => u.uid === uid)?.controller !== me)
+        const ordered = [...enemies, ...spec.legal.filter((uid) => !enemies.includes(uid))]
+        const n = spec.min > 0 ? spec.min : Math.min(1, spec.max)
+        return { t: 'choose', player: me, choice: { kind: 'unit', uids: ordered.slice(0, n) } }
+      }
+      case 'card':
+        return { t: 'choose', player: me, choice: { kind: 'card', indices: spec.legal.slice(0, spec.min) } }
+      case 'mode':
+        return { t: 'choose', player: me, choice: { kind: 'mode', picks: Array.from({ length: spec.n }, (_, i) => i) } }
+      case 'yesNo':
+        return { t: 'choose', player: me, choice: { kind: 'yesNo', yes: true } }
+      case 'location':
+        return { t: 'choose', player: me, choice: { kind: 'location', loc: spec.options[0] } }
+    }
+  }
+
   // --- mulligan: replace expensive cards (energy >= 5)
   if (s.phase === 'mulligan') {
     if (my.mulliganed) return null
@@ -20,13 +50,8 @@ export function botAction(s: GameState, me: PlayerIx): GameAction | null {
     return { t: 'mulligan', player: me, cardIds }
   }
 
-  // --- chain: pass, then resolve own items
+  // --- chain: pass whenever it holds priority (resolution is automatic)
   if (s.chain.length > 0) {
-    const top = s.chain[s.chain.length - 1]
-    if (s.chainPasses >= 2) {
-      if (top.controller === me) return { t: 'resolveChainTop', player: me, choice: 'keep' }
-      return null
-    }
     if (s.chainActive === me) return { t: 'pass', player: me }
     return null
   }
@@ -38,11 +63,6 @@ export function botAction(s: GameState, me: PlayerIx): GameAction | null {
   }
 
   if (s.turnPlayer !== me || s.phase !== 'action') return null
-
-  // --- combats first
-  if (s.pendingCombat.length > 0) {
-    return { t: 'chooseCombat', player: me, battlefield: s.pendingCombat[0] }
-  }
 
   // --- develop: play the biggest affordable unit/gear (units & gear only)
   const play = bestPlay(s, me)

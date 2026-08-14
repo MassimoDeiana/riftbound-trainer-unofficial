@@ -27,10 +27,11 @@ Sur l'écran d'accueil : choisis ton deck, le deck de l'IA, puis **🤖 Jouer co
 - Mise en place complète 1v1 : pioche de 4, mulligan (max 2), 2 champs de bataille tirés au sort (1 par joueur), le 2e joueur canalise 3 runes à son premier tour.
 - Tour : redressement, **scoring de Tenue**, canalisation de 2 runes, pioche, vidage des pools.
 - Économie : runes → énergie (engager) ou puissance (recycler), coûts des cartes vérifiés, Accelerate.
-- Déplacements standards (+ Ganking), showdowns, **combats complets** (Assault/Shield/Tank/Stun, assignation létale, rappel des attaquants, Conquête).
+- Déplacements standards (+ Ganking), showdowns et **combats déclenchés automatiquement** (règles de Cleanup 323), **contrôle basé sur la présence** (quitter un champ de bataille = perdre son contrôle).
+- **Combats complets** (Assault/Shield/Tank/Stun) : l'**assignation des dégâts est un choix du joueur** (règle 465.2.c — létal complet, Tank d'abord, Backline en dernier), demandée uniquement quand plusieurs répartitions sont légales ; soin général et rappel des attaquants au Combat Cleanup ; Conquête.
 - Scoring : Conquête/Tenue (1x par champ de bataille par tour), **restriction du point final**, Burn Out, victoire à 8 points.
-- La chaîne : sorts et déclencheurs « When you play me », réponses en [Reaction], résolution LIFO.
-- Mots-clés : Action, Reaction, Accelerate, Assault, Shield, Tank, Ganking, Hidden (cartes cachées), Legion, Temporary, Deathknell (rappel), Vision.
+- La chaîne façon **FEPR** : priorité au lanceur d'abord (337.4), réponses en [Reaction], **résolution automatique** quand les deux joueurs passent, focus conservé après les chaînes de déclencheurs (346.1).
+- Mots-clés : Action, Reaction, Accelerate, Assault, Shield, Tank, Ganking, Hidden (coût : 1 puissance de n'importe quel domaine), Legion, Temporary, Deathknell (rappel), Vision.
 
 ## Ce qui reste manuel (assisté)
 
@@ -48,13 +49,14 @@ npm run build         # build de production (dist/)
 npm run fetch-cards   # met à jour src/data/cards.json depuis Riftcodex
 ```
 
-- `docs/rules-spec.md` — spécification condensée des règles officielles (Core Rules 2025-06-02) qui sert de référence au moteur.
-- `src/engine/` — moteur pur TS (reducer déterministe, RNG seedé) ; les deux clients rejouent le même journal d'actions.
+- `docs/rules-spec.md` — spécification condensée des règles officielles (Core Rules **2026-07-16**) qui sert de référence au moteur.
+- `src/engine/` — moteur pur TS (reducer déterministe, RNG seedé) ; les deux clients rejouent le même journal d'actions (protocole **v2** : chaque choix de joueur est une action `choose` répliquée).
+- `src/game/legacy/` — moteur v1 gelé, utilisé uniquement pour relire les parties archivées au format v1.
 - Déploiement : n'importe quel hébergeur statique (`dist/` sur Netlify, GitHub Pages, Cloudflare Pages…).
 
-## Limites connues (v1)
+## Limites connues (v2 / M0)
 
 - 1v1 uniquement.
-- L'assignation des dégâts de combat est automatique (Tanks d'abord, puis Might décroissant) — corrigez avec les outils manuels si un choix différent est voulu.
-- Deflect, les couches d'effets continus et l'action « Invite » ne sont pas simulés.
+- Deflect et les couches d'effets continus ne sont pas encore simulés (moteur d'effets par carte : en cours, voir la roadmap M1–M4).
 - Pas de reconnexion d'état automatique : bouton **↻ Resync** en cas de doute (renvoie l'état de l'autre joueur).
+- Les parties enregistrées avec l'ancien moteur (v1) restent consultables en relecture, mais ne peuvent pas être reprises.

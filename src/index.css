@@ -851,6 +851,68 @@ button.icon {
   align-items: center;
   justify-content: center;
 }
+.assign-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 12px;
+}
+.unit-ability {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  z-index: 5;
+  font-size: 12px;
+  padding: 2px 6px;
+  border-radius: 7px;
+  border: 1px solid var(--gold);
+  background: rgba(20, 26, 40, 0.92);
+  color: var(--gold);
+  cursor: pointer;
+}
+.unit-ability:hover {
+  background: var(--gold);
+  color: #10141f;
+}
+.ident-card .legend-activate {
+  position: absolute;
+  bottom: 26px;
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+.ident-card {
+  position: relative;
+}
+.ident-card.exhausted {
+  filter: grayscale(0.5) brightness(0.8);
+}
+.unit.targetable {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+  border-radius: 8px;
+  cursor: crosshair;
+  animation: target-pulse 1.2s ease-in-out infinite;
+}
+@keyframes target-pulse {
+  0%, 100% { outline-color: var(--gold); }
+  50% { outline-color: #fff3c4; }
+}
+.choice-cards .choice-card-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: center;
+  max-height: 130px;
+  overflow-y: auto;
+}
+.assign-row .assign-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
 .dock-btn {
   font: inherit;
   color: inherit;

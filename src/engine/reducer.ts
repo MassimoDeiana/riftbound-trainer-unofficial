@@ -1,434 +1,45 @@
-import type { Domain } from '../data/cards'
-import { combatMight, def, hasPlayedTrigger, keywords, unitMight, unitsAt } from './cardinfo'
+import { scriptFor } from '../effects/registry'
+import type { NamedTarget, Op } from '../effects/ir'
+import { evalCond, type EffectCtx } from '../effects/selectors'
+import { answerVmChoice, canPayCost, payCostNow, startProgram } from '../effects/vm'
+import { def, hasPlayedTrigger, keywords } from './cardinfo'
+import { effectiveEnergyCost } from './queries'
+import {
+  afterChainResolve,
+  applyAssignDamageChoice,
+  fireBoardEvent,
+  firePlayCardTriggers,
+  arriveAt,
+  availablePower,
+  banishUnit,
+  beginCombat,
+  beginShowdown,
+  canActNow,
+  checkWin,
+  cleanup,
+  closeShowdown,
+  discardCard,
+  draw,
+  endTurn,
+  IllegalAction,
+  killUnit,
+  log,
+  other,
+  payAnyPower,
+  payPower,
+  pname,
+  bfName,
+  pushChain,
+  queueTriggersFor,
+  resolveChainTop,
+  startTurn,
+  totalPower,
+} from './core'
 import { shuffle } from './rng'
-import type {
-  GameAction,
-  GameState,
-  LocationRef,
-  ManualOp,
-  PlayerIx,
-  UnitEntity,
-} from './types'
-import { CHANNEL_PER_TURN, MAX_MULLIGAN, VICTORY_SCORE } from './types'
+import type { GameAction, GameState, LocationRef, ManualOp, PlayerIx, UnitEntity } from './types'
+import { MAX_MULLIGAN } from './types'
 
-export class IllegalAction extends Error {}
-
-const other = (p: PlayerIx): PlayerIx => (p === 0 ? 1 : 0)
-
-function log(s: GameState, text: string, player: PlayerIx | null = null) {
-  s.log.push({ turn: s.turn, player, text })
-}
-
-function pname(s: GameState, p: PlayerIx) {
-  return s.players[p].name
-}
-
-function bfName(s: GameState, ix: number) {
-  return def(s.battlefields[ix].cardId).name
-}
-
-// ---------------------------------------------------------------- drawing
-
-function burnOut(s: GameState, p: PlayerIx) {
-  const pl = s.players[p]
-  const opp = other(p)
-  if (pl.trash.length > 0) {
-    pl.deck.push(...pl.trash.splice(0))
-    shuffle(s.rng, pl.deck)
-  }
-  s.players[opp].points += 1
-  log(s, `Burn Out ! ${pname(s, p)} n'a plus de deck : ${pname(s, opp)} gagne 1 point.`, p)
-  checkWin(s)
-}
-
-function draw(s: GameState, p: PlayerIx, n: number) {
-  const pl = s.players[p]
-  for (let i = 0; i < n; i++) {
-    if (s.winner !== null) return
-    if (pl.deck.length === 0) {
-      burnOut(s, p)
-      if (pl.deck.length === 0) continue // deck and trash both empty
-    }
-    pl.hand.push(pl.deck.shift()!)
-  }
-}
-
-function checkWin(s: GameState) {
-  if (s.winner !== null) return
-  for (const p of [0, 1] as PlayerIx[]) {
-    if (s.players[p].points >= VICTORY_SCORE) {
-      s.winner = p
-      s.phase = 'over'
-      log(s, `🏆 ${pname(s, p)} atteint ${VICTORY_SCORE} points et gagne la partie !`)
-      return
-    }
-  }
-}
-
-// ---------------------------------------------------------------- scoring
-
-function score(s: GameState, p: PlayerIx, bfIx: number, method: 'hold' | 'conquer') {
-  const bf = s.battlefields[bfIx]
-  if (bf.scoredBy[p]) return
-  bf.scoredBy[p] = true
-  const pl = s.players[p]
-  // Final point restriction: at Victory-1, a Conquer only scores if every
-  // battlefield was scored by this player this turn; otherwise draw a card.
-  if (pl.points === VICTORY_SCORE - 1 && method === 'conquer') {
-    const scoredAll = s.battlefields.every((b) => b.scoredBy[p])
-    if (!scoredAll) {
-      draw(s, p, 1)
-      log(
-        s,
-        `${pname(s, p)} conquiert ${bfName(s, bfIx)} à 7 points sans avoir marqué chaque champ de bataille : pioche 1 carte au lieu du point final.`,
-        p
-      )
-      return
-    }
-  }
-  pl.points += 1
-  log(
-    s,
-    `${pname(s, p)} marque 1 point (${method === 'hold' ? 'Tenue' : 'Conquête'} de ${bfName(s, bfIx)}) → ${pl.points} pts.`,
-    p
-  )
-  const text = def(bf.cardId).text
-  if (text) log(s, `Capacité de ${bfName(s, bfIx)} : « ${text} » (appliquer manuellement si besoin).`, p)
-  checkWin(s)
-}
-
-function setControl(s: GameState, bfIx: number, p: PlayerIx) {
-  const bf = s.battlefields[bfIx]
-  if (bf.controller === p) return
-  bf.controller = p
-  bf.contestedBy = null
-  log(s, `${pname(s, p)} prend le contrôle de ${bfName(s, bfIx)}.`, p)
-  score(s, p, bfIx, 'conquer')
-}
-
-// ---------------------------------------------------------------- units
-
-function killUnit(s: GameState, uid: number, cause: string) {
-  const ix = s.units.findIndex((u) => u.uid === uid)
-  if (ix < 0) return
-  const u = s.units[ix]
-  s.units.splice(ix, 1)
-  const card = def(u.cardId)
-  const owner = u.controller // 1v1: controller == owner in this engine
-  if (u.isChampion) {
-    // Champions go to the trash like any unit (cannot return to Champion Zone)
-  }
-  s.players[owner].trash.push(u.cardId)
-  log(s, `${card.name} de ${pname(s, owner)} est détruit (${cause}).`, owner)
-  if (keywords(u.cardId).deathknell) {
-    log(
-      s,
-      `⚠️ Deathknell de ${card.name} : « ${card.text} » — à résoudre manuellement (outils manuels).`,
-      owner
-    )
-  }
-}
-
-function arriveAt(s: GameState, u: UnitEntity, loc: LocationRef) {
-  u.location = loc
-  if (typeof loc === 'number') {
-    const bf = s.battlefields[loc]
-    if (bf.controller !== u.controller && bf.contestedBy === null) {
-      bf.contestedBy = u.controller
-      log(s, `${pname(s, u.controller)} conteste ${bfName(s, loc)}.`, u.controller)
-    }
-    // Units arriving at an active combat battlefield join the fight
-    if (s.showdown && s.showdown.battlefield === loc && s.showdown.defender !== null) {
-      u.combatRole = u.controller === s.showdown.attacker ? 'attacker' : 'defender'
-    }
-  }
-}
-
-// ---------------------------------------------------------------- cleanup
-
-function cleanup(s: GameState) {
-  if (s.winner !== null) return
-  // 1. Kill lethal-damaged units
-  for (const u of [...s.units]) {
-    if (u.kind === 'unit' && u.damage > 0 && u.damage >= unitMight(u)) {
-      killUnit(s, u.uid, 'dégâts létaux')
-    }
-  }
-  // 2. Remove combat designations from units not at the combat battlefield
-  const combatBf = s.showdown?.defender !== null && s.showdown ? s.showdown.battlefield : null
-  for (const u of s.units) {
-    if (u.combatRole !== null && u.location !== combatBf) u.combatRole = null
-  }
-  // 4. Facedown cards: removed when their owner no longer controls the
-  //    battlefield or has no unit present there
-  s.battlefields.forEach((bf, ix) => {
-    if (!bf.facedown) return
-    const owner = bf.facedown.owner
-    if (bf.controller !== owner || unitsAt(s, ix, owner).length === 0) {
-      s.players[owner].trash.push(bf.facedown.cardId)
-      log(s, `La carte cachée à ${bfName(s, ix)} est défaussée (contrôle perdu).`, owner)
-      bf.facedown = null
-    }
-  })
-  // Contest & control resolution
-  s.pendingCombat = []
-  s.battlefields.forEach((bf, ix) => {
-    const p0 = unitsAt(s, ix, 0).length
-    const p1 = unitsAt(s, ix, 1).length
-    if (p0 > 0 && p1 > 0) {
-      // 5. Combat pending
-      s.pendingCombat.push(ix)
-    } else if (p0 + p1 > 0) {
-      const present: PlayerIx = p0 > 0 ? 0 : 1
-      if (bf.controller !== present) {
-        if (bf.controller === null) {
-          bf.contestedBy = present // showdown will resolve control
-        } else {
-          // Empty enemy battlefield: control flips immediately (conquer)
-          setControl(s, ix, present)
-        }
-      } else {
-        bf.contestedBy = null
-      }
-    }
-  })
-  if (s.winner !== null) return
-  // 6–7. In Neutral Open state, start showdowns/combats
-  if (s.chain.length === 0 && s.showdown === null) {
-    // Non-combat showdown at a contested, uncontrolled battlefield
-    const contestedIx = s.battlefields.findIndex(
-      (bf, ix) => bf.contestedBy !== null && bf.controller === null && !s.pendingCombat.includes(ix)
-    )
-    if (contestedIx >= 0) {
-      const attacker = s.battlefields[contestedIx].contestedBy!
-      s.showdown = { battlefield: contestedIx, attacker, defender: null, focus: attacker, passes: 0 }
-      log(s, `Showdown à ${bfName(s, contestedIx)} (sans combat).`, attacker)
-      return
-    }
-    if (s.pendingCombat.length === 1) {
-      startCombat(s, s.pendingCombat[0])
-    } else if (s.pendingCombat.length > 1) {
-      log(s, `Plusieurs combats en attente : ${pname(s, s.turnPlayer)} choisit l'ordre.`)
-    }
-  }
-}
-
-function startCombat(s: GameState, bfIx: number) {
-  const bf = s.battlefields[bfIx]
-  const attacker = bf.contestedBy ?? other(bf.controller ?? s.turnPlayer)
-  const defender = other(attacker)
-  for (const u of unitsAt(s, bfIx)) {
-    u.combatRole = u.controller === attacker ? 'attacker' : 'defender'
-  }
-  s.showdown = { battlefield: bfIx, attacker, defender, focus: attacker, passes: 0 }
-  s.pendingCombat = s.pendingCombat.filter((ix) => ix !== bfIx)
-  log(s, `⚔️ Combat à ${bfName(s, bfIx)} : ${pname(s, attacker)} attaque ${pname(s, defender)}.`)
-  for (const u of unitsAt(s, bfIx)) {
-    const text = def(u.cardId).text
-    if (/when i attack|when i defend/i.test(text)) {
-      log(s, `⚠️ Déclencheur de ${def(u.cardId).name} : « ${text} » — à résoudre manuellement.`, u.controller)
-    }
-  }
-}
-
-// ---------------------------------------------------------------- combat damage
-
-/** Auto-assignment: Tanks first, then highest Might; full lethal per unit. */
-function assignDamage(pool: number, targets: UnitEntity[]): Map<number, number> {
-  const out = new Map<number, number>()
-  const ordered = [...targets].sort((a, b) => {
-    const ta = keywords(a.cardId).tank ? 1 : 0
-    const tb = keywords(b.cardId).tank ? 1 : 0
-    if (ta !== tb) return tb - ta
-    return unitMight(b) - unitMight(a)
-  })
-  let remaining = pool
-  for (const u of ordered) {
-    if (remaining <= 0) break
-    const lethal = Math.max(1, unitMight(u) - u.damage)
-    const dealt = Math.min(lethal, remaining)
-    out.set(u.uid, dealt)
-    remaining -= dealt
-  }
-  return out
-}
-
-function combatDamageAndResolution(s: GameState) {
-  const sd = s.showdown!
-  const bfIx = sd.battlefield
-  const attackerUnits = s.units.filter((u) => u.location === bfIx && u.combatRole === 'attacker')
-  const defenderUnits = s.units.filter((u) => u.location === bfIx && u.combatRole === 'defender')
-
-  if (attackerUnits.length > 0 && defenderUnits.length > 0) {
-    const atkTotal = attackerUnits.reduce((n, u) => n + combatMight(u), 0)
-    const defTotal = defenderUnits.reduce((n, u) => n + combatMight(u), 0)
-    const toDefenders = assignDamage(atkTotal, defenderUnits)
-    const toAttackers = assignDamage(defTotal, attackerUnits)
-    log(s, `Dégâts de combat : attaque ${atkTotal} / défense ${defTotal}.`)
-    for (const [uid, dmg] of [...toDefenders, ...toAttackers]) {
-      const u = s.units.find((x) => x.uid === uid)!
-      u.damage += dmg
-      log(s, `${def(u.cardId).name} subit ${dmg} dégât(s).`)
-    }
-    // Kill lethal units now (resolution step 1)
-    for (const u of [...s.units]) {
-      if (u.kind === 'unit' && u.damage > 0 && u.damage >= unitMight(u)) {
-        killUnit(s, u.uid, 'combat')
-      }
-    }
-  } else {
-    log(s, `Pas de dégâts de combat (un camp n'a plus d'unités).`)
-  }
-
-  const bf = s.battlefields[bfIx]
-  const atkLeft = s.units.filter((u) => u.location === bfIx && u.controller === sd.attacker)
-  const defLeft = s.units.filter((u) => u.location === bfIx && u.controller === sd.defender!)
-
-  if (atkLeft.length > 0 && defLeft.length > 0) {
-    for (const u of atkLeft) {
-      u.location = 'base'
-      u.combatRole = null
-    }
-    log(s, `Les deux camps survivent : les attaquants de ${pname(s, sd.attacker)} sont rappelés à la base.`)
-  } else if (defLeft.length === 0 && atkLeft.length > 0) {
-    setControl(s, bfIx, sd.attacker)
-  }
-  bf.contestedBy = null
-  // Clear ALL marked damage on all units everywhere (end of any combat)
-  for (const u of s.units) {
-    u.damage = 0
-    if (u.location !== bfIx) u.combatRole = null
-  }
-  for (const u of s.units) u.combatRole = null
-  s.showdown = null
-  cleanup(s)
-}
-
-function endShowdown(s: GameState) {
-  const sd = s.showdown!
-  if (sd.defender !== null) {
-    combatDamageAndResolution(s)
-    return
-  }
-  // Non-combat showdown: contester takes control
-  const bfIx = sd.battlefield
-  const bf = s.battlefields[bfIx]
-  s.showdown = null
-  if (bf.contestedBy !== null && unitsAt(s, bfIx, bf.contestedBy).length > 0) {
-    setControl(s, bfIx, bf.contestedBy)
-  }
-  cleanup(s)
-}
-
-// ---------------------------------------------------------------- turn flow
-
-function startTurn(s: GameState, p: PlayerIx) {
-  if (s.winner !== null) return
-  s.turn += 1
-  s.turnPlayer = p
-  s.phase = 'action'
-  s.cardsPlayedThisTurn = [0, 0]
-  for (const bf of s.battlefields) bf.scoredBy = [false, false]
-  log(s, `— Tour ${s.turn} : ${pname(s, p)} —`)
-
-  // Awaken: ready everything the turn player controls
-  for (const u of s.units) if (u.controller === p) u.ready = true
-  for (const r of s.players[p].runes) r.ready = true
-
-  // Beginning step: Temporary permanents die before scoring
-  for (const u of [...s.units]) {
-    if (u.controller === p && keywords(u.cardId).temporary) {
-      killUnit(s, u.uid, 'Temporaire')
-    }
-  }
-  for (const u of s.units) {
-    if (u.controller === p && /at the start of/i.test(def(u.cardId).text)) {
-      log(s, `⚠️ Début de tour — ${def(u.cardId).name} : « ${def(u.cardId).text} »`, p)
-    }
-  }
-
-  // Scoring step: Hold
-  s.battlefields.forEach((bf, ix) => {
-    if (bf.controller === p) score(s, p, ix, 'hold')
-  })
-  if (s.winner !== null) return
-
-  // Channel phase: 2 runes (second player channels 3 on their first turn)
-  const n = s.turn === 2 ? CHANNEL_PER_TURN + 1 : CHANNEL_PER_TURN
-  const pl = s.players[p]
-  const channeled = pl.runeDeck.splice(0, n)
-  for (const cardId of channeled) {
-    pl.runes.push({ uid: s.nextUid++, cardId, ready: true })
-  }
-  log(s, `${pname(s, p)} canalise ${channeled.length} rune(s).`, p)
-
-  // Draw phase
-  draw(s, p, 1)
-  log(s, `${pname(s, p)} pioche 1 carte.`, p)
-  // Rune pools empty at end of Draw Phase
-  for (const q of s.players) q.pool = { energy: 0, power: {} }
-
-  cleanup(s)
-}
-
-function endTurn(s: GameState) {
-  const p = s.turnPlayer
-  // Ending step: stun wears off
-  for (const u of s.units) u.stunned = false
-  for (const u of s.units) {
-    if (/at the end of/i.test(def(u.cardId).text)) {
-      log(s, `⚠️ Fin de tour — ${def(u.cardId).name} : « ${def(u.cardId).text} »`, u.controller)
-    }
-  }
-  // Expiration step: clear damage, "this turn" effects, pools
-  for (const u of s.units) {
-    u.damage = 0
-    u.tempMight = 0
-  }
-  for (const q of s.players) q.pool = { energy: 0, power: {} }
-  cleanup(s)
-  if (s.winner !== null) return
-  startTurn(s, other(p))
-}
-
-// ---------------------------------------------------------------- costs
-
-function payPower(s: GameState, p: PlayerIx, amount: number, domains: Domain[]): boolean {
-  const pool = s.players[p].pool
-  let need = amount
-  for (const d of domains) {
-    const have = pool.power[d] ?? 0
-    const use = Math.min(have, need)
-    pool.power[d] = have - use
-    need -= use
-  }
-  const uni = pool.power.Universal ?? 0
-  const useUni = Math.min(uni, need)
-  pool.power.Universal = uni - useUni
-  need -= useUni
-  return need === 0
-}
-
-function availablePower(s: GameState, p: PlayerIx, domains: Domain[]): number {
-  const pool = s.players[p].pool
-  let n = pool.power.Universal ?? 0
-  for (const d of domains) n += pool.power[d] ?? 0
-  return n
-}
-
-// ---------------------------------------------------------------- timing
-
-function canActNow(s: GameState, p: PlayerIx, kw: { action: boolean; reaction: boolean }): boolean {
-  if (s.winner !== null || s.phase !== 'action') return false
-  if (s.chain.length > 0) {
-    // Closed state: only Reactions by the active chain player, before the chain locks
-    return kw.reaction && s.chainActive === p && s.chainPasses < 2
-  }
-  if (s.showdown) {
-    return (kw.action || kw.reaction) && s.showdown.focus === p
-  }
-  return s.turnPlayer === p
-}
+export { IllegalAction }
 
 // ---------------------------------------------------------------- manual ops
 
@@ -483,6 +94,9 @@ function applyManual(s: GameState, p: PlayerIx, op: ManualOp) {
     case 'kill':
       killUnit(s, op.unitUid, 'effet')
       break
+    case 'banish':
+      banishUnit(s, op.unitUid)
+      break
     case 'recallUnit': {
       const u = unit(op.unitUid)
       if (u) {
@@ -524,12 +138,9 @@ function applyManual(s: GameState, p: PlayerIx, op: ManualOp) {
       break
     }
     case 'discard': {
-      const h = s.players[op.who].hand
-      const ix = h.indexOf(op.cardId)
-      if (ix >= 0) {
-        h.splice(ix, 1)
-        s.players[op.who].trash.push(op.cardId)
-        log(s, `🔧 ${who} : ${pname(s, op.who)} défausse ${def(op.cardId).name}.`, p)
+      if (s.players[op.who].hand.includes(op.cardId)) {
+        log(s, `🔧 ${who} :`, p)
+        discardCard(s, op.who, op.cardId)
       }
       break
     }
@@ -565,6 +176,11 @@ export function applyAction(prev: GameState, action: GameAction): GameState {
 
   if (s.winner !== null && action.t !== 'manual') return s
 
+  // A pending choice suspends everything except its answer (and safety valves).
+  if (s.pending !== null && action.t !== 'choose' && action.t !== 'manual' && action.t !== 'concede') {
+    throw new IllegalAction(`En attente du choix de ${pname(s, s.pending.player)}`)
+  }
+
   switch (action.t) {
     case 'mulligan': {
       if (s.phase !== 'mulligan') throw new IllegalAction('Pas en phase de mulligan')
@@ -599,7 +215,7 @@ export function applyAction(prev: GameState, action: GameAction): GameState {
       const ix = pl.runes.findIndex((r) => r.uid === action.runeUid)
       if (ix < 0) throw new IllegalAction('Rune introuvable')
       const rune = pl.runes[ix]
-      const domain = (def(rune.cardId).domains[0] ?? 'Universal') as Domain
+      const domain = (def(rune.cardId).domains[0] ?? 'Universal') as keyof typeof pl.pool.power
       pl.runes.splice(ix, 1)
       pl.runeDeck.push(rune.cardId) // bottom of rune deck
       pl.pool.power[domain] = (pl.pool.power[domain] ?? 0) + 1
@@ -620,6 +236,10 @@ export function applyAction(prev: GameState, action: GameAction): GameState {
       } else if (action.from === 'champion') {
         if (!pl.championInZone || pl.championId !== action.cardId)
           throw new IllegalAction('Champion indisponible')
+      } else if (action.from === 'trash') {
+        if (!pl.trash.includes(action.cardId)) throw new IllegalAction('Carte absente de la défausse')
+        if (!scriptFor(action.cardId)?.playFromTrash)
+          throw new IllegalAction('Cette carte ne se joue pas depuis la défausse')
       } else {
         const bf = s.battlefields[action.battlefield ?? -1]
         if (!bf?.facedown || bf.facedown.owner !== p || bf.facedown.cardId !== action.cardId)
@@ -628,9 +248,14 @@ export function applyAction(prev: GameState, action: GameAction): GameState {
           throw new IllegalAction('Jouable à partir du tour suivant')
       }
 
+      // The card counts as played from here on (Legion checks "another card"
+      // as count > 1, consistent at cost time and trigger time). The clone is
+      // discarded on any IllegalAction, so early increment is safe.
+      s.cardsPlayedThisTurn[p] += 1
+
       // Costs (hidden plays ignore the base cost)
       if (!isHiddenPlay) {
-        const energy = card.energy ?? 0
+        const energy = effectiveEnergyCost(s, p, action.cardId)
         const power = card.power ?? 0
         const extraEnergy = action.accelerate && kw.accelerate ? 1 : 0
         const extraPower = action.accelerate && kw.accelerate ? 1 : 0
@@ -644,9 +269,10 @@ export function applyAction(prev: GameState, action: GameAction): GameState {
       // Remove from source zone
       if (action.from === 'hand') pl.hand.splice(pl.hand.indexOf(action.cardId), 1)
       else if (action.from === 'champion') pl.championInZone = false
+      else if (action.from === 'trash') pl.trash.splice(pl.trash.indexOf(action.cardId), 1)
       else s.battlefields[action.battlefield!].facedown = null
 
-      s.cardsPlayedThisTurn[p] += 1
+      if (isHiddenPlay) fireBoardEvent(s, p, 'youPlayFromHidden')
       if (kw.legion && s.cardsPlayedThisTurn[p] > 1) {
         log(s, `Légion de ${card.name} est active (une autre carte a été jouée ce tour).`, p)
       }
@@ -654,96 +280,267 @@ export function applyAction(prev: GameState, action: GameAction): GameState {
         log(s, `⚠️ Mots-clés non gérés sur ${card.name} : ${kw.unknown.join(', ')} — appliquer manuellement.`, p)
       }
 
-      if (card.type === 'Unit') {
-        let loc: LocationRef = action.location ?? 'base'
-        if (typeof loc === 'number' && s.battlefields[loc].controller !== p) {
-          throw new IllegalAction('Une unité arrive à la base ou sur un champ de bataille contrôlé')
+      const script = scriptFor(action.cardId)
+
+      if (card.type === 'Unit' || card.type === 'Gear') {
+        let loc: LocationRef = card.type === 'Gear' ? 'base' : (action.location ?? 'base')
+        if (card.type === 'Unit' && typeof loc === 'number' && s.battlefields[loc].controller !== p) {
+          // Alternate play permissions: open battlefield (no units) / occupied
+          // enemy battlefield (Sneaky Deckhand, Deadbloom Predator…).
+          const perm = script?.playTo
+          const unitsThere = s.units.filter((u) => u.location === loc && u.kind === 'unit')
+          const openOk = perm === 'openBattlefield' && unitsThere.length === 0
+          const enemyOk =
+            perm === 'enemyBattlefield' &&
+            s.battlefields[loc].controller !== null &&
+            unitsThere.some((u) => u.controller !== p)
+          const ambushOk = perm === 'whereYouControlUnits' && unitsThere.some((u) => u.controller === p)
+          if (!openOk && !enemyOk && !ambushOk) {
+            throw new IllegalAction('Une unité arrive à la base ou sur un champ de bataille contrôlé')
+          }
         }
+        // Hidden permanents are played to the battlefield they were hidden at
+        // (811.1.d.1), gear included.
         if (isHiddenPlay) loc = action.battlefield!
+        // "Enters ready": Accelerate, the card's own script, a turn-wide grant
+        // (Confront / Sun Disc charge), or a board aura (Magma Wurm).
+        let entersReady = Boolean(action.accelerate && kw.accelerate)
+        if (!entersReady && card.type === 'Unit' && script?.entersReady !== undefined) {
+          if (script.entersReady === true) entersReady = true
+          else {
+            const ctx: EffectCtx = { cardId: action.cardId, sourceUid: null, sourceBattlefield: null, controller: p, eventUid: null, vars: {} }
+            entersReady = evalCond(s, ctx, script.entersReady)
+          }
+        }
+        if (!entersReady && card.type === 'Unit' && s.entryReady) {
+          if (s.entryReady[p] === -1) entersReady = true
+          else if (s.entryReady[p] > 0) {
+            s.entryReady[p] -= 1
+            entersReady = true
+          }
+        }
+        if (!entersReady && card.type === 'Unit') {
+          entersReady = s.units.some((src) => {
+            if (src.controller !== p) return false
+            const sc = scriptFor(src.cardId)
+            return (sc?.abilities ?? []).some((ab) => ab.kind === 'passive' && ab.effect.kind === 'entryReady')
+          })
+        }
         const u: UnitEntity = {
           uid: s.nextUid++,
           cardId: action.cardId,
           controller: p,
-          kind: 'unit',
+          kind: card.type === 'Gear' ? 'gear' : 'unit',
           location: 'base',
-          ready: Boolean(action.accelerate && kw.accelerate),
+          ready: card.type === 'Gear' ? !script?.entersExhausted : entersReady,
           damage: 0,
           buffed: false,
           stunned: false,
           combatRole: null,
           tempMight: 0,
           isChampion: action.from === 'champion',
+          grants: [],
         }
         s.units.push(u)
         arriveAt(s, u, loc)
         log(
           s,
-          `${pname(s, p)} joue ${card.name}${typeof loc === 'number' ? ` à ${bfName(s, loc)}` : ''}${u.ready ? ' (Accélérée, arrive redressée)' : ''}.`,
+          `${pname(s, p)} joue ${card.type === 'Gear' ? "l'équipement " : ''}${card.name}${typeof loc === 'number' ? ` à ${bfName(s, loc)}` : ''}${u.ready && card.type === 'Unit' ? ' (arrive redressée)' : ''}.`,
           p
         )
-        if (hasPlayedTrigger(card)) {
-          s.chain.push({
-            uid: s.nextUid++,
-            cardId: action.cardId,
-            label: `Déclencheur : ${card.name}`,
-            controller: p,
-            kind: 'trigger',
-            scripted: kw.vision,
-            script: kw.vision ? 'vision' : undefined,
-          })
-          s.chainActive = other(p)
-          s.chainPasses = 0
+        firePlayCardTriggers(s, p, action.cardId, u.uid)
+        // Units/Gear resolve immediately (337.2); their play trigger chains.
+        const queued = queueTriggersFor(s, action.cardId, p, 'play', { sourceUid: u.uid })
+        if (queued) {
+          // scripted play trigger on the chain
+        } else if ((!script || script.manual) && hasPlayedTrigger(card)) {
+          pushChain(
+            s,
+            {
+              cardId: action.cardId,
+              label: `Déclencheur : ${card.name}`,
+              controller: p,
+              kind: 'trigger',
+              scripted: kw.vision,
+              script: kw.vision ? 'vision' : undefined,
+            },
+            'trigger'
+          )
           log(s, `Déclencheur de ${card.name} sur la chaîne : « ${card.text} »`, p)
         } else {
           cleanup(s)
         }
-      } else if (card.type === 'Gear') {
-        const u: UnitEntity = {
-          uid: s.nextUid++,
-          cardId: action.cardId,
-          controller: p,
-          kind: 'gear',
-          location: 'base',
-          ready: true,
-          damage: 0,
-          buffed: false,
-          stunned: false,
-          combatRole: null,
-          tempMight: 0,
-          isChampion: false,
-        }
-        s.units.push(u)
-        log(s, `${pname(s, p)} joue l'équipement ${card.name}.`, p)
-        if (hasPlayedTrigger(card)) {
-          s.chain.push({
-            uid: s.nextUid++,
-            cardId: action.cardId,
-            label: `Déclencheur : ${card.name}`,
-            controller: p,
-            kind: 'trigger',
-            scripted: false,
-          })
-          s.chainActive = other(p)
-          s.chainPasses = 0
-        } else {
-          cleanup(s)
-        }
       } else if (card.type === 'Spell') {
-        s.chain.push({
-          uid: s.nextUid++,
+        const scriptedSpell = script?.spell !== undefined
+        const item = {
           cardId: action.cardId,
           label: card.name,
           controller: p,
-          kind: 'spell',
+          kind: 'spell' as const,
           targets: action.targets,
-          scripted: false,
-        })
-        s.chainActive = other(p)
-        s.chainPasses = 0
-        if (s.showdown) s.showdown.passes = 0
+          scripted: scriptedSpell,
+        }
+        pushChain(s, item, 'play')
         log(s, `${pname(s, p)} joue le sort ${card.name} : « ${card.text} »`, p)
+        firePlayCardTriggers(s, p, action.cardId, null)
+        // Scripted spells choose their targets while finalizing (349).
+        const targetSpecs = script?.spell?.targets ?? []
+        if (scriptedSpell && targetSpecs.length > 0) {
+          const itemUid = s.chain[s.chain.length - 1].uid
+          const ctx: EffectCtx = {
+            cardId: action.cardId,
+            sourceUid: null,
+            sourceBattlefield: null,
+            controller: p,
+            eventUid: null,
+            vars: {},
+          }
+          const chooseOps: Op[] = (targetSpecs as NamedTarget[]).map((t) => ({
+            op: 'choose',
+            bind: t.bind,
+            spec: t.spec,
+            optional: t.optional,
+          }))
+          startProgram(s, ctx, chooseOps, 'finalizeItem', itemUid)
+        }
       } else {
         throw new IllegalAction(`Type injouable : ${card.type}`)
+      }
+      return s
+    }
+
+    case 'activateAbility': {
+      const src = action.source
+      let cardId: string
+      let sourceUid: number | null = null
+      let sourceBattlefield: number | null = null
+      if (src.kind === 'unit') {
+        const u = s.units.find((x) => x.uid === src.uid)
+        if (!u || u.controller !== p) throw new IllegalAction('Source invalide')
+        cardId = u.cardId
+        sourceUid = u.uid
+      } else if (src.kind === 'legend') {
+        cardId = s.players[p].legendId
+      } else {
+        const bf = s.battlefields[src.ix]
+        if (!bf) throw new IllegalAction('Champ de bataille invalide')
+        cardId = bf.cardId
+        sourceBattlefield = src.ix
+      }
+      const script = scriptFor(cardId)
+      // abilityIx -2 = the Empower ability (827): pay once, gain Empowered.
+      if (action.abilityIx === -2) {
+        if (!script?.empower || src.kind !== 'unit') throw new IllegalAction('Empower introuvable')
+        const unit2 = s.units.find((x) => x.uid === (src as { kind: 'unit'; uid: number }).uid)
+        if (!unit2 || unit2.empowered) throw new IllegalAction('Déjà Empowered')
+        if (!canActNow(s, p, { action: false, reaction: false })) throw new IllegalAction('Timing illégal')
+        if (!canPayCost(s, p, unit2.uid, script.empower.cost)) throw new IllegalAction('Coût impayable')
+        payCostNow(s, p, unit2.uid, script.empower.cost)
+        unit2.empowered = true
+        log(s, `${def(cardId).name} devient Empowered.`, p)
+        cleanup(s)
+        return s
+      }
+      // abilityIx -1 = the Equip ability of an Equipment gear (818).
+      if (action.abilityIx === -1) {
+        if (!script?.equip || src.kind !== 'unit') throw new IllegalAction('Équipement introuvable')
+        const gearUnit = s.units.find((x) => x.uid === (src as { kind: 'unit'; uid: number }).uid)
+        if (!gearUnit || gearUnit.kind !== 'gear') throw new IllegalAction('Équipement introuvable')
+        const timing = { action: false, reaction: keywords(cardId).reaction }
+        if (!canActNow(s, p, timing)) throw new IllegalAction('Timing illégal')
+        if (!canPayCost(s, p, gearUnit.uid, script.equip.cost)) throw new IllegalAction('Coût impayable')
+        payCostNow(s, p, gearUnit.uid, script.equip.cost)
+        log(s, `${pname(s, p)} équipe ${def(cardId).name}.`, p)
+        pushChain(
+          s,
+          {
+            cardId,
+            label: `Équiper : ${def(cardId).name}`,
+            controller: p,
+            kind: 'ability',
+            scripted: true,
+            abilityIx: -1,
+            sourceUid: gearUnit.uid,
+          },
+          'play'
+        )
+        return s
+      }
+      const ability = script?.abilities?.[action.abilityIx]
+      if (!ability || ability.kind !== 'activated') throw new IllegalAction('Capacité introuvable')
+      // Unattached Equipment: only the Equip ability is active (720).
+      if (script?.equip && sourceUid !== null) {
+        const g = s.units.find((x) => x.uid === sourceUid)
+        if (g?.kind === 'gear' && (g.attachedTo === undefined || g.attachedTo === null))
+          throw new IllegalAction('Équipement non attaché : texte inactif')
+      }
+      // Timing: default = your turn, Neutral Open; Action/Reaction extend it.
+      const timing = { action: ability.timing === 'action', reaction: ability.timing === 'reaction' }
+      if (!canActNow(s, p, timing)) throw new IllegalAction('Timing illégal pour cette capacité')
+      if (ability.restriction) {
+        const rctx: EffectCtx = { cardId, sourceUid, sourceBattlefield, controller: p, eventUid: null, vars: {} }
+        if (!evalCond(s, rctx, ability.restriction)) throw new IllegalAction('Condition non remplie')
+      }
+      if (ability.oncePerTurn) {
+        const key = `${sourceUid ?? cardId}:${action.abilityIx}`
+        if ((s.onceUsed[key] ?? 0) >= 1) throw new IllegalAction('Déjà utilisée ce tour')
+        s.onceUsed[key] = 1
+      }
+      // Legend exhaust cost uses the legend's own orientation.
+      if (src.kind === 'legend' && ability.cost.exhaustSelf) {
+        if (!s.players[p].legendReady) throw new IllegalAction('Légende déjà engagée')
+      } else if (!canPayCost(s, p, sourceUid, ability.cost)) {
+        throw new IllegalAction('Coût impayable')
+      }
+      if (src.kind === 'legend' && ability.cost.exhaustSelf) {
+        const costRest = { ...ability.cost, exhaustSelf: undefined }
+        if (!canPayCost(s, p, null, costRest)) throw new IllegalAction('Coût impayable')
+        s.players[p].legendReady = false
+        payCostNow(s, p, null, costRest)
+      } else {
+        payCostNow(s, p, sourceUid, ability.cost)
+      }
+      log(s, `${pname(s, p)} active « ${def(cardId).name} ».`, p)
+      // Choice-based costs (discard/recycleTrash) become a program prefix.
+      const prefix: Op[] = []
+      if (ability.cost.discard) {
+        prefix.push({ op: 'discard', n: ability.cost.discard, who: 'you' })
+      }
+      if (ability.cost.recycleTrash) {
+        prefix.push(
+          {
+            op: 'choose',
+            bind: '__cost',
+            spec: { kind: 'card', zone: 'trash', who: 'you', min: ability.cost.recycleTrash, max: ability.cost.recycleTrash },
+          },
+          { op: 'recycleFromTrash', bind: '__cost' }
+        )
+      }
+      // Pure Add-resource abilities resolve immediately, unreactable (337.2).
+      const pureAdd = ability.ops.every((o) => o.op === 'addEnergy' || o.op === 'addPower')
+      if (pureAdd && prefix.length === 0 && (ability.targets ?? []).length === 0) {
+        const ctx: EffectCtx = { cardId, sourceUid, sourceBattlefield, controller: p, eventUid: null, vars: {} }
+        startProgram(s, ctx, ability.ops, 'none')
+        return s
+      }
+      pushChain(
+        s,
+        {
+          cardId,
+          label: `Capacité : ${def(cardId).name}`,
+          controller: p,
+          kind: 'ability',
+          scripted: true,
+          abilityIx: action.abilityIx,
+          sourceUid,
+          targetVars: sourceBattlefield !== null ? { __bf: sourceBattlefield } : undefined,
+        },
+        'play'
+      )
+      if (prefix.length > 0) {
+        // The cost choices run right away (they are part of paying).
+        const ctx: EffectCtx = { cardId, sourceUid, sourceBattlefield, controller: p, eventUid: null, vars: {} }
+        startProgram(s, ctx, prefix, 'none')
       }
       return s
     }
@@ -764,6 +561,7 @@ export function applyAction(prev: GameState, action: GameAction): GameState {
           (typeof from === 'number' && typeof to === 'number' && keywords(u.cardId).ganking)
         if (!legal || from === to) throw new IllegalAction('Destination illégale')
       }
+      const origins: [number, LocationRef][] = (movers as UnitEntity[]).map((u) => [u.uid, u.location])
       for (const u of movers as UnitEntity[]) {
         u.ready = false
         arriveAt(s, u, action.to)
@@ -774,6 +572,19 @@ export function applyAction(prev: GameState, action: GameAction): GameState {
         `${pname(s, p)} déplace ${names} vers ${action.to === 'base' ? 'la base' : bfName(s, action.to as number)}.`,
         p
       )
+      // "When I move" triggers + origin-battlefield "moved from here" triggers
+      for (const u of movers as UnitEntity[]) {
+        queueTriggersFor(s, u.cardId, u.controller, 'move', { sourceUid: u.uid })
+      }
+      for (const [uid, from] of origins) {
+        if (typeof from === 'number') {
+          queueTriggersFor(s, s.battlefields[from].cardId, p, 'moveFromHere', {
+            sourceUid: null,
+            sourceBattlefield: from,
+            eventUid: uid,
+          })
+        }
+      }
       cleanup(s)
       return s
     }
@@ -786,9 +597,9 @@ export function applyAction(prev: GameState, action: GameAction): GameState {
       if (!keywords(action.cardId).hidden) throw new IllegalAction('Cette carte n’a pas Hidden')
       const bf = s.battlefields[action.battlefield]
       if (!bf || bf.controller !== p || bf.facedown) throw new IllegalAction('Champ de bataille invalide')
-      const identity = def(pl.legendId).domains
-      if (availablePower(s, p, identity) < 1) throw new IllegalAction('1 puissance requise')
-      payPower(s, p, 1, identity)
+      // Hide costs 1 power of any domain (811.1.b).
+      if (totalPower(s, p) < 1) throw new IllegalAction('1 puissance requise')
+      payAnyPower(s, p, 1)
       pl.hand.splice(pl.hand.indexOf(action.cardId), 1)
       bf.facedown = { cardId: action.cardId, owner: p, hiddenOnTurn: s.turn }
       log(s, `${pname(s, p)} cache une carte à ${bfName(s, action.battlefield)}.`, p)
@@ -799,11 +610,11 @@ export function applyAction(prev: GameState, action: GameAction): GameState {
       if (s.chain.length > 0) {
         if (s.chainActive !== p) throw new IllegalAction('Pas la priorité')
         s.chainPasses += 1
-        if (s.chainPasses < 2) {
-          s.chainActive = other(p)
+        if (s.chainPasses >= 2) {
+          // All players passed in sequence: the top of the chain resolves (339-340).
+          resolveChainTop(s)
         } else {
-          s.chainActive = s.chain[s.chain.length - 1].controller
-          log(s, `La chaîne est verrouillée : ${pname(s, s.chainActive)} résout ${s.chain[s.chain.length - 1].label}.`)
+          s.chainActive = other(p)
         }
         return s
       }
@@ -811,7 +622,7 @@ export function applyAction(prev: GameState, action: GameAction): GameState {
         if (s.showdown.focus !== p) throw new IllegalAction('Pas le focus')
         s.showdown.passes += 1
         if (s.showdown.passes >= 2) {
-          endShowdown(s)
+          closeShowdown(s)
         } else {
           s.showdown.focus = other(p)
         }
@@ -820,52 +631,50 @@ export function applyAction(prev: GameState, action: GameAction): GameState {
       throw new IllegalAction('Rien à passer')
     }
 
-    case 'resolveChainTop': {
-      const top = s.chain[s.chain.length - 1]
-      if (!top) throw new IllegalAction('Chaîne vide')
-      if (s.chainPasses < 2) throw new IllegalAction('Les deux joueurs doivent d’abord passer')
-      if (top.controller !== p) throw new IllegalAction('Seul son contrôleur résout cet élément')
-      s.chain.pop()
-      if (top.script === 'vision') {
-        const pl = s.players[p]
-        if (action.choice === 'recycle' && pl.deck.length > 0) {
-          pl.deck.push(pl.deck.shift()!)
-          log(s, `Vision : ${pname(s, p)} recycle la carte du dessus de son deck.`, p)
-        } else {
-          log(s, `Vision : ${pname(s, p)} garde la carte du dessus.`, p)
-        }
-      } else if (top.kind === 'spell' && top.cardId) {
-        s.players[p].trash.push(top.cardId)
-        log(s, `${top.label} est résolu (effets appliqués manuellement) → défausse.`, p)
-      } else {
-        log(s, `${top.label} est résolu.`, p)
+    case 'choose': {
+      const pending = s.pending
+      if (!pending) throw new IllegalAction('Aucun choix en attente')
+      if (pending.player !== p) throw new IllegalAction('Ce choix ne vous revient pas')
+      const choice = action.choice
+      if (choice.kind !== pending.spec.kind) throw new IllegalAction('Réponse inattendue')
+      // Choices addressed to the effect VM resume its execution.
+      if (pending.vm) {
+        answerVmChoice(s, choice)
+        return s
       }
-      s.chainPasses = 0
-      cleanup(s)
-      if (s.chain.length > 0) {
-        s.chainActive = s.chain[s.chain.length - 1].controller
-      } else {
-        s.chainActive = null
-        if (s.showdown) {
-          s.showdown.focus = other(s.showdown.focus)
-          s.showdown.passes = 0
+      switch (choice.kind) {
+        case 'assignDamage':
+          applyAssignDamageChoice(s, choice.assignments)
+          return s
+        case 'battlefield': {
+          if (pending.spec.kind !== 'battlefield' || !pending.spec.options.includes(choice.battlefield))
+            throw new IllegalAction('Champ de bataille invalide')
+          const reason = pending.spec.reason
+          s.pending = null
+          if (reason === 'showdown') beginShowdown(s, choice.battlefield)
+          else beginCombat(s, choice.battlefield)
+          return s
         }
+        case 'vision': {
+          const pl = s.players[p]
+          s.pending = null
+          if (choice.recycle && pl.deck.length > 0) {
+            pl.deck.push(pl.deck.shift()!)
+            log(s, `Vision : ${pname(s, p)} recycle la carte du dessus de son deck.`, p)
+          } else {
+            log(s, `Vision : ${pname(s, p)} garde la carte du dessus.`, p)
+          }
+          afterChainResolve(s)
+          return s
+        }
+        default:
+          throw new IllegalAction('Réponse inattendue')
       }
-      return s
-    }
-
-    case 'chooseCombat': {
-      if (s.turnPlayer !== p) throw new IllegalAction('Seul le joueur actif choisit')
-      if (s.chain.length > 0 || s.showdown) throw new IllegalAction('Impossible maintenant')
-      if (!s.pendingCombat.includes(action.battlefield)) throw new IllegalAction('Pas de combat ici')
-      startCombat(s, action.battlefield)
-      return s
     }
 
     case 'endTurn': {
       if (s.turnPlayer !== p || s.phase !== 'action') throw new IllegalAction('Pas votre tour')
-      if (s.chain.length > 0 || s.showdown || s.pendingCombat.length > 0)
-        throw new IllegalAction('Résolvez la chaîne / le combat d’abord')
+      if (s.chain.length > 0 || s.showdown) throw new IllegalAction('Résolvez la chaîne / le combat d’abord')
       log(s, `${pname(s, p)} termine son tour.`, p)
       endTurn(s)
       return s
@@ -874,6 +683,7 @@ export function applyAction(prev: GameState, action: GameAction): GameState {
     case 'concede': {
       s.winner = other(p)
       s.phase = 'over'
+      s.pending = null
       log(s, `${pname(s, p)} abandonne. 🏆 ${pname(s, other(p))} gagne !`)
       return s
     }
