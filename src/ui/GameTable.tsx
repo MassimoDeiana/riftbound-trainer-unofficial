@@ -6,6 +6,7 @@ import { defaultAssignment } from '../engine/core'
 import { might } from '../engine/queries'
 import type { GameAction, GameState, LocationRef, PlayerIx, UnitEntity } from '../engine/types'
 import { MAX_MULLIGAN, VICTORY_SCORE } from '../engine/types'
+import { usePacedState } from './anim'
 import { announceHover, CardImg } from './CardImg'
 import { GlobalTools, UnitTools } from './Tools'
 
@@ -18,7 +19,9 @@ export interface TimeTravel {
 }
 
 export function GameTable({
-  state,
+  state: liveState,
+  lastAction = null,
+  seq = 0,
   me,
   dispatch,
   error,
@@ -28,6 +31,8 @@ export function GameTable({
   timeTravel,
 }: {
   state: GameState
+  lastAction?: GameAction | null
+  seq?: number
   me: PlayerIx
   dispatch: (a: GameAction) => void
   error: string | null
@@ -37,6 +42,18 @@ export function GameTable({
   timeTravel?: TimeTravel
 }) {
   const opp: PlayerIx = me === 0 ? 1 : 0
+  const [anims, setAnims] = useState(() => localStorage.getItem('rb.anims') !== '0')
+  const animLayerRef = useRef<HTMLDivElement>(null)
+  // Paced display: the shown state replays opponent actions at a readable tempo.
+  const { shown, busy, reveal, skip } = usePacedState(
+    liveState,
+    lastAction,
+    seq,
+    me,
+    anims && !timeTravel?.review,
+    animLayerRef
+  )
+  const state = shown
   const my = state.players[me]
   const op = state.players[opp]
   const [selected, setSelected] = useState<number[]>([])
@@ -83,7 +100,15 @@ export function GameTable({
     ((state.chain.length > 0 && state.chainActive === me) ||
       (state.chain.length === 0 && state.showdown?.focus === me))
 
-  const act = (a: GameAction) => dispatch(a)
+  // While the display catches up on opponent actions, clicks fast-forward the
+  // animations instead of dispatching against a state the player hasn't seen.
+  const act = (a: GameAction) => {
+    if (busy && a.t !== 'concede') {
+      skip()
+      return
+    }
+    dispatch(a)
+  }
 
   // Auto-pass (façon Arena) : passe automatiquement les fenêtres de
   // réaction/showdown quand aucune carte jouable ne le justifie.
@@ -101,11 +126,11 @@ export function GameTable({
     })
   })()
   useEffect(() => {
-    if (!autoPass || !canPass || hasPlayableWindowCard || timeTravel?.review) return
+    if (busy || !autoPass || !canPass || hasPlayableWindowCard || timeTravel?.review) return
     const t = setTimeout(() => dispatch({ t: 'pass', player: me }), 350)
     return () => clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state, autoPass, canPass, hasPlayableWindowCard])
+  }, [state, busy, autoPass, canPass, hasPlayableWindowCard])
 
   const playPending = (loc?: LocationRef) => {
     if (!pendingCard) return
@@ -235,6 +260,18 @@ export function GameTable({
                   }
                 >
                   {autoPass ? '⏩ Auto-passe : ON' : '⏩ Auto-passe : OFF'}
+                </button>
+                <button
+                  className={`small ${anims ? 'primary' : ''}`}
+                  title="Rejoue les actions adverses au ralenti avec des animations"
+                  onClick={() =>
+                    setAnims((a) => {
+                      localStorage.setItem('rb.anims', a ? '0' : '1')
+                      return !a
+                    })
+                  }
+                >
+                  {anims ? '🎬 Animations : ON' : '🎬 Animations : OFF'}
                 </button>
                 <button className="small danger" onClick={() => confirm('Abandonner ?') && act({ t: 'concede', player: me })}>
                   Abandonner
@@ -452,7 +489,7 @@ export function GameTable({
               )}
             </div>
 
-            <div className="hand-fan">
+            <div className="hand-fan" data-anchor={`hand-fan-${me}`}>
               {my.hand.length === 0 && <span className="dim" style={{ padding: 20 }}>Main vide</span>}
               {my.hand.map((cardId, i) => {
                 const n = my.hand.length
@@ -492,7 +529,7 @@ export function GameTable({
             </div>
 
             <div className="action-dock">
-              <div className="score-big" title={`Points de victoire : ${my.points}/${VICTORY_SCORE}`}>
+              <div className="score-big" title={`Points de victoire : ${my.points}/${VICTORY_SCORE}`} data-anchor={`score-${me}`}>
                 <span className="score-big-num">{my.points}</span>
                 <span className="score-big-max">/{VICTORY_SCORE}</span>
                 <span className="score-big-lbl">pts</span>
@@ -523,7 +560,7 @@ export function GameTable({
                   setTools={setTools}
                 />
               )}
-              <CountNums pl={my} onTrash={() => setTrashView(me)} />
+              <CountNums pl={my} who={me} onTrash={() => setTrashView(me)} />
             </div>
           </div>
 
@@ -533,6 +570,22 @@ export function GameTable({
             </div>
           )}
         </div>
+
+        {/* ------- animation overlays ------- */}
+        <div className="anim-layer" ref={animLayerRef} />
+        {reveal && (
+          <div className="reveal-overlay">
+            <div className="reveal-card">
+              <CardImg card={def(reveal.cardId)} width={225} zoom={false} />
+              <div className="reveal-label">{reveal.label}</div>
+            </div>
+          </div>
+        )}
+        {busy && (
+          <button className="skip-anim" onClick={skip} title="Passer les animations">
+            ⏩
+          </button>
+        )}
 
         {/* ------- log overlay (optional) ------- */}
         {showLog && (
@@ -963,11 +1016,11 @@ function RunesRow({
 }
 
 /** Card-count numbers only (hand / deck / rune deck / trash). */
-function CountNums({ pl, onTrash }: { pl: GameState['players'][number]; onTrash: () => void }) {
+function CountNums({ pl, who, onTrash }: { pl: GameState['players'][number]; who?: PlayerIx; onTrash: () => void }) {
   return (
     <div className="counts-grid">
-      <span title="Cartes en main">✋ {pl.hand.length}</span>
-      <span title="Deck principal">📚 {pl.deck.length}</span>
+      <span title="Cartes en main" data-anchor={who !== undefined ? `handcount-${who}` : undefined}>✋ {pl.hand.length}</span>
+      <span title="Deck principal" data-anchor={who !== undefined ? `deck-${who}` : undefined}>📚 {pl.deck.length}</span>
       <span title="Deck de runes">🎴 {pl.runeDeck.length}</span>
       <button className="counts-trash" title="Défausse (cliquer pour voir)" onClick={onTrash}>
         🗑 {pl.trash.length}
@@ -977,15 +1030,15 @@ function CountNums({ pl, onTrash }: { pl: GameState['players'][number]; onTrash:
 }
 
 /** Compact score + counts readout (used on the opponent bar). */
-function Counts({ pl, score, onTrash }: { pl: GameState['players'][number]; score: number; onTrash: () => void }) {
+function Counts({ pl, who, score, onTrash }: { pl: GameState['players'][number]; who?: PlayerIx; score: number; onTrash: () => void }) {
   return (
     <div className="counts">
-      <div className="counts-score" title={`Points de victoire : ${score}/${VICTORY_SCORE}`}>
+      <div className="counts-score" title={`Points de victoire : ${score}/${VICTORY_SCORE}`} data-anchor={who !== undefined ? `score-${who}` : undefined}>
         <span className="counts-num">{score}</span>
         <span className="counts-max">/{VICTORY_SCORE}</span>
         <span className="counts-lbl">pts</span>
       </div>
-      <CountNums pl={pl} onTrash={onTrash} />
+      <CountNums pl={pl} who={who} onTrash={onTrash} />
     </div>
   )
 }
@@ -1041,7 +1094,7 @@ function PlayerBar({
         </div>
       </div>
       <RunesRow state={state} p={p} me={me} hints={hints} act={act} />
-      <Counts pl={pl} score={pl.points} onTrash={onTrash} />
+      <Counts pl={pl} who={p} score={pl.points} onTrash={onTrash} />
     </div>
   )
 }
@@ -1073,6 +1126,7 @@ function Unit({
     <div
       className={`unit ${u.ready ? '' : 'exhausted'} ${u.controller === me ? 'mine' : 'theirs'} ${tool ? 'tools-open' : ''} ${targetable ? 'targetable' : ''}`}
       style={{ position: 'relative' }}
+      data-auid={u.uid}
     >
       {/* cropped: show only the top of the card (art + cost + name); full text on hover */}
       <CardImg card={card} width={width} crop={0.62} selected={selected} onClick={onClick} />

@@ -69,6 +69,10 @@ export default function App() {
   const meRef = useRef<PlayerIx>(0)
   const gameRef = useRef<GameState | null>(null)
   gameRef.current = game
+  // Online animation pacing: the last applied action and a monotonic sequence
+  // number (jumps of ≠1 make the display snap instead of animating).
+  const lastActionRef = useRef<GameAction | null>(null)
+  const actionSeqRef = useRef(0)
 
   // The board currently shown (solo/review = the state at the cursor; online = the live state).
   const displayGame = soloHist ? soloHist.states[soloHist.cursor] : game
@@ -257,6 +261,8 @@ export default function App() {
       } else if (msg.kind === 'reqstate') {
         if (gameRef.current) room.sendSync({ kind: 'state', state: gameRef.current } satisfies SyncMsg)
       } else if (msg.kind === 'state') {
+        lastActionRef.current = null
+        actionSeqRef.current += 1000 // resync: snap the display
         setGame(msg.state)
         setError(null)
       }
@@ -266,7 +272,10 @@ export default function App() {
       setGame((g) => {
         if (!g) return g
         try {
-          return applyAction(g, action)
+          const next = applyAction(g, action)
+          lastActionRef.current = action
+          actionSeqRef.current += 1
+          return next
         } catch (e) {
           console.error('Remote action failed', e, action)
           return g
@@ -296,6 +305,8 @@ export default function App() {
       try {
         const next = applyAction(g, action)
         roomRef.current?.sendAction(action)
+        lastActionRef.current = action
+        actionSeqRef.current += 1
         return next
       } catch (e) {
         if (e instanceof IllegalAction) setError(e.message)
@@ -333,6 +344,8 @@ export default function App() {
         <CardPreview />
         <GameTable
           state={displayGame}
+          lastAction={soloHist ? (soloHist.log[soloHist.cursor - 1] ?? null) : lastActionRef.current}
+          seq={soloHist ? soloHist.cursor : actionSeqRef.current}
           me={meRef.current}
           dispatch={soloHist ? soloDispatch : dispatch}
           error={error}
@@ -518,7 +531,7 @@ export default function App() {
               🤖 Jouer contre l'IA
             </button>
             <span className="dim" style={{ fontSize: 13, width: '100%' }}>
-              L'IA applique toutes les règles mais ne joue pas de sorts : ses déclencheurs se résolvent sans effet (le journal les affiche).
+              L'IA joue par les règles et applique tous les effets de cartes. Ses actions sont rejouées avec des animations (désactivables en partie via ⋯ → 🎬).
             </span>
           </div>
 
