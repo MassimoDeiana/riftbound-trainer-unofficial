@@ -125,7 +125,7 @@ function step(s: GameState, exec: ExecState, frame: Frame, op: Op): 'ok' | 'susp
   switch (op.op) {
     case 'choose': {
       const who = resolveWho(ctx, op.who)[0]
-      const spec = compileChoice(s, ctx, op.spec)
+      const spec = compileChoice(s, ctx, op.spec, who)
       if (spec === null) {
         // Nothing to choose (no legal options / empty zone): bind empty, move on.
         ctx.vars[op.bind] = []
@@ -297,8 +297,9 @@ function step(s: GameState, exec: ExecState, frame: Frame, op: Op): 'ok' | 'susp
       break
     case 'gainXp':
       for (const p of resolveWho(ctx, op.who)) {
-        s.players[p].xp = (s.players[p].xp ?? 0) + evalAmount(s, ctx, op.n)
-        log(s, `${pname(s, p)} gagne ${evalAmount(s, ctx, op.n)} XP (total ${s.players[p].xp}).`, p)
+        const n = evalAmount(s, ctx, op.n)
+        s.players[p].xp = Math.max(0, (s.players[p].xp ?? 0) + n)
+        log(s, `${pname(s, p)} ${n >= 0 ? 'gagne' : 'dépense'} ${Math.abs(n)} XP (total ${s.players[p].xp}).`, p)
       }
       break
 
@@ -661,10 +662,16 @@ type EngineSpec = NonNullable<GameState['pending']>['spec']
 
 /** Compile an IR choice into an engine ChoiceSpec with concrete legal options.
  *  Returns null when there is nothing to choose. */
-export function compileChoice(s: GameState, ctx: EffectCtx, spec: ChoiceIR): EngineSpec | null {
+export function compileChoice(s: GameState, ctx: EffectCtx, spec: ChoiceIR, chooser?: PlayerIx): EngineSpec | null {
   switch (spec.kind) {
     case 'unit': {
-      const legal = unitsMatching(s, ctx, spec.filter).map((u) => u.uid)
+      // Deflect (809): the tax is a cost to choose — an enemy Deflect unit the
+      // chooser cannot afford is not a legal pick at all.
+      const who = chooser ?? ctx.controller
+      const powerTotal = Object.values(s.players[who].pool.power).reduce((a, b) => a + (b ?? 0), 0)
+      const legal = unitsMatching(s, ctx, spec.filter)
+        .filter((u) => u.controller === who || effKeywords(s, u).deflect <= powerTotal)
+        .map((u) => u.uid)
       if (legal.length === 0) return null
       const max = Math.min(spec.max, legal.length)
       const min = Math.min(spec.min, legal.length)

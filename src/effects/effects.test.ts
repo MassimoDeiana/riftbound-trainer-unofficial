@@ -378,13 +378,17 @@ describe('deflect, cost mods & watchers', () => {
     giveHand(s, 0, 'ogn-004-298')
     s = energy(s, 0, 1)
     s = run(s, { t: 'playCard', player: 0, cardId: 'ogn-004-298', from: 'hand' })
-    expect(s.pending?.spec.kind).toBe('unit')
-    // No power in pool → choosing the Deflect unit is refused
-    expect(() =>
-      applyAction(s, { t: 'choose', player: 0, choice: { kind: 'unit', uids: [poro] } })
-    ).toThrow(IllegalAction)
-    // With 1 power, the choice goes through and the power is consumed
+    // No power in pool → the Deflect unit is not a legal target at all (809):
+    // the choice fizzles instead of opening.
+    expect(s.pending).toBeFalsy()
+    s = passBoth(s) // resolve the targetless Cleave
+    expect(s.units.some((u) => u.uid === poro)).toBe(true)
+    // With 1 power, the choice opens and the tax is consumed on pick
+    giveHand(s, 0, 'ogn-004-298')
+    s = energy(s, 0, 1)
     s = run(s, { t: 'manual', player: 0, op: { k: 'power', who: 0, domain: 'Body', n: 1 } })
+    s = run(s, { t: 'playCard', player: 0, cardId: 'ogn-004-298', from: 'hand' })
+    expect(s.pending?.spec.kind).toBe('unit')
     s = run(s, { t: 'choose', player: 0, choice: { kind: 'unit', uids: [poro] } })
     expect(s.players[0].pool.power.Body ?? 0).toBe(0)
   })

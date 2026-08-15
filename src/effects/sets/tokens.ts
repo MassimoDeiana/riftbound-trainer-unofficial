@@ -17,4 +17,7 @@ export const TOKEN_SCRIPTS: Record<string, CardScript> = {
       },
     ],
   },
+  'tok-mech': { vanilla: true }, // Mech (SFD)
+  'tok-bird': { vanilla: true }, // Bird ([Deflect] is engine-native)
+  'tok-sandsoldier': { vanilla: true }, // Sand Soldier (SFD)
 }

@@ -185,7 +185,7 @@ export const SFD_SCRIPTS: Record<string, CardScript> = {
   // "[Quick-Draw][Equip] 1 Fury"
   'sfd-022-221': {
     quickDraw: true,
-    equip: { cost: { power: { n: 1, domain: 'Fury' } } },
+    equip: { bonusMight: 2, cost: { power: { n: 1, domain: 'Fury' } } },
     abilities: [
       {
         kind: 'triggered',
@@ -240,7 +240,7 @@ export const SFD_SCRIPTS: Record<string, CardScript> = {
   'sfd-029-221': { manual: true }, // Rek'Sai - Breacher — grants [Accelerate] to units depending on their play zone: modifies the play of other cards, out of scope
 
   // "[Equip] 1 energy + 1 Fury"
-  'sfd-030-221': { equip: { cost: { energy: 1, power: { n: 1, domain: 'Fury' } } } }, // Skyfall of Areion
+  'sfd-030-221': { equip: { bonusMight: 2, cost: { energy: 1, power: { n: 1, domain: 'Fury' } } } }, // Skyfall of Areion
 
   // "[Repeat 2] Play a 2 might Sand Soldier unit token."
   'sfd-031-221': {
@@ -263,7 +263,7 @@ export const SFD_SCRIPTS: Record<string, CardScript> = {
   }, // Disarming Rake
 
   // "[Equip] 1 Calm"
-  'sfd-033-221': { equip: { cost: { power: { n: 1, domain: 'Calm' } } } }, // Doran's Shield
+  'sfd-033-221': { equip: { bonusMight: 1, cost: { power: { n: 1, domain: 'Calm' } } } }, // Doran's Shield
 
   // "[Reaction][Repeat 2] Give a unit +2 might this turn."
   'sfd-034-221': {
@@ -337,7 +337,7 @@ export const SFD_SCRIPTS: Record<string, CardScript> = {
   'sfd-041-221': { manual: true }, // Apprentice Smith — reveal top of Main Deck and branch on its type: no reveal-top-card op (lookTop can't draw/branch by type)
 
   // "[Equip] 1 Calm"
-  'sfd-042-221': { equip: { cost: { power: { n: 1, domain: 'Calm' } } } }, // Brutalizer
+  'sfd-042-221': { equip: { bonusMight: 1, cost: { power: { n: 1, domain: 'Calm' } } } }, // Brutalizer
 
   // "[Hidden][Action] Move any number of friendly units at a battlefield to their base."
   'sfd-043-221': {
@@ -374,7 +374,7 @@ export const SFD_SCRIPTS: Record<string, CardScript> = {
   'sfd-050-221': { manual: true }, // Azir - Ascendant — échange de positions (« ma position d'origine ») + ré-attache conditionnelle inexprimables
 
   // "[Equip] Calm" — pas d'autre texte
-  'sfd-051-221': { equip: { cost: { power: { n: 1, domain: 'Calm' } } }, vanilla: true }, // Guardian Angel
+  'sfd-051-221': { equip: { bonusMight: 1, cost: { power: { n: 1, domain: 'Calm' } } }, vanilla: true }, // Guardian Angel
 
   // "exhaust: Give a unit +3 might this turn." (Gear)
   'sfd-052-221': {
@@ -409,7 +409,7 @@ export const SFD_SCRIPTS: Record<string, CardScript> = {
   // "[Quick-Draw][Equip] Calm" — pas d'autre texte
   'sfd-056-221': {
     quickDraw: true,
-    equip: { cost: { power: { n: 1, domain: 'Calm' } } },
+    equip: { bonusMight: 3, cost: { power: { n: 1, domain: 'Calm' } } },
     abilities: [
       {
         kind: 'triggered',
@@ -600,7 +600,7 @@ export const SFD_SCRIPTS: Record<string, CardScript> = {
   }, // Dropboarder
 
   // "[Equip] Mind" — pas d'autre texte
-  'sfd-073-221': { equip: { cost: { power: { n: 1, domain: 'Mind' } } }, vanilla: true }, // Experimental Hexplate
+  'sfd-073-221': { equip: { bonusMight: 1, cost: { power: { n: 1, domain: 'Mind' } } }, vanilla: true }, // Experimental Hexplate
 
   // "When you play me, you may kill a gear with Energy cost ≤1. If you do, play a Gold gear token exhausted."
   'sfd-074-221': {
@@ -726,7 +726,7 @@ export const SFD_SCRIPTS: Record<string, CardScript> = {
   }, // Ornn - Forge God
 
   // "[Equip] Mind" — pas d'autre texte
-  'sfd-086-221': { equip: { cost: { power: { n: 1, domain: 'Mind' } } }, vanilla: true }, // World Atlas
+  'sfd-086-221': { equip: { bonusMight: 2, cost: { power: { n: 1, domain: 'Mind' } } }, vanilla: true }, // World Atlas
 
   // "[Reaction] Draw 3."
   'sfd-087-221': {
@@ -760,7 +760,7 @@ export const SFD_SCRIPTS: Record<string, CardScript> = {
   }, // Rumble - Scrapper
 
   // manual pour la capacité de bannissement, mais l'attache Equip reste jouable par le moteur
-  'sfd-090-221': { equip: { cost: { energy: 1, power: { n: 1, domain: 'Mind' } } }, manual: true }, // The Zero Drive — suivi des unités bannies « avec ceci » + jeux gratuits
+  'sfd-090-221': { equip: { bonusMight: 2, cost: { energy: 1, power: { n: 1, domain: 'Mind' } } }, manual: true }, // The Zero Drive — suivi des unités bannies « avec ceci » + jeux gratuits
 
   // ---- SFD batch 3 ----
 
@@ -804,7 +804,7 @@ export const SFD_SCRIPTS: Record<string, CardScript> = {
   'sfd-094-221': { entersReady: { exists: { controller: 'you', tag: 'Dragon', notSelf: true } }, vanilla: true }, // Direwing
 
   // "[Equip] Body"
-  'sfd-095-221': { equip: { cost: { power: { n: 1, domain: 'Body' } } }, vanilla: true }, // Doran's Blade
+  'sfd-095-221': { equip: { bonusMight: 2, cost: { power: { n: 1, domain: 'Body' } } }, vanilla: true }, // Doran's Blade
 
   // "Ganking" — keyword only, engine-native
   'sfd-096-221': { vanilla: true }, // Laurent Bladekeeper
@@ -849,7 +849,7 @@ export const SFD_SCRIPTS: Record<string, CardScript> = {
   'sfd-101-221': { manual: true }, // Fae Dragon — pas de déclencheur « quand vous dépensez un buff »
 
   // "[Equip] Body"
-  'sfd-102-221': { equip: { cost: { power: { n: 1, domain: 'Body' } } }, vanilla: true }, // Hexdrinker
+  'sfd-102-221': { equip: { bonusMight: 1, cost: { power: { n: 1, domain: 'Body' } } }, vanilla: true }, // Hexdrinker
 
   'sfd-103-221': { manual: true }, // Jaull-Fish — réduction de coût de 2 PAR unité Mighty : pas de multiplication d'Amount
 
@@ -870,7 +870,7 @@ export const SFD_SCRIPTS: Record<string, CardScript> = {
   'sfd-107-221': { manual: true }, // Strike Down — aucun op « détacher un équipement »
 
   // "[Equip] Body"
-  'sfd-108-221': { equip: { cost: { power: { n: 1, domain: 'Body' } } }, vanilla: true }, // Warmog's Armor
+  'sfd-108-221': { equip: { bonusMight: 1, cost: { power: { n: 1, domain: 'Body' } } }, vanilla: true }, // Warmog's Armor
 
   'sfd-109-221': { manual: true }, // Akshan - Mischievous — vol de gear temporaire (« until I leave ») + attache conditionnelle
 
@@ -956,14 +956,14 @@ export const SFD_SCRIPTS: Record<string, CardScript> = {
   }, // Marching Orders
 
   // "[Equip] Body"
-  'sfd-115-221': { equip: { cost: { power: { n: 1, domain: 'Body' } } }, vanilla: true }, // Trinity Force
+  'sfd-115-221': { equip: { bonusMight: 2, cost: { power: { n: 1, domain: 'Body' } } }, vanilla: true }, // Trinity Force
 
   'sfd-116-221': { manual: true }, // Yone - Blademaster — condition « battlefield qui était incontrôlé » (état pré-conquête) non exprimable
 
   'sfd-117-221': { manual: true }, // Ancient Henge — paiement X variable (« pay any amount of Energy »)
 
   // "[Equip] 1 energy + Body"
-  'sfd-118-221': { equip: { cost: { energy: 1, power: { n: 1, domain: 'Body' } } }, vanilla: true }, // Boneshiver
+  'sfd-118-221': { equip: { bonusMight: 2, cost: { energy: 1, power: { n: 1, domain: 'Body' } } }, vanilla: true }, // Boneshiver
 
   'sfd-119-221': { manual: true }, // Jax - Unrelenting — pas de déclencheur « quand vous m'attachez un équipement »
 
@@ -994,7 +994,7 @@ export const SFD_SCRIPTS: Record<string, CardScript> = {
   'sfd-123-221': { manual: true }, // Corrupt Enforcer — pas de déclencheur « quand je gagne un combat »
 
   // "[Equip] Chaos"
-  'sfd-124-221': { equip: { cost: { power: { n: 1, domain: 'Chaos' } } }, vanilla: true }, // Doran's Ring
+  'sfd-124-221': { equip: { bonusMight: 1, cost: { power: { n: 1, domain: 'Chaos' } } }, vanilla: true }, // Doran's Ring
 
   // "When I move to a battlefield, you may pay Chaos to move a unit you control to the same battlefield."
   'sfd-125-221': {
@@ -1113,10 +1113,10 @@ export const SFD_SCRIPTS: Record<string, CardScript> = {
   }, // Beast Below
 
   // "[Equip] Chaos"
-  'sfd-133-221': { equip: { cost: { power: { n: 1, domain: 'Chaos' } } }, vanilla: true }, // Boots of Swiftness
+  'sfd-133-221': { equip: { bonusMight: 2, cost: { power: { n: 1, domain: 'Chaos' } } }, vanilla: true }, // Boots of Swiftness
 
   // "[Equip] Chaos"
-  'sfd-134-221': { equip: { cost: { power: { n: 1, domain: 'Chaos' } } }, vanilla: true }, // Cull
+  'sfd-134-221': { equip: { bonusMight: 1, cost: { power: { n: 1, domain: 'Chaos' } } }, vanilla: true }, // Cull
 
   // "[Action] Return a gear to its owner's hand."
   'sfd-135-221': {
@@ -1156,7 +1156,7 @@ export const SFD_SCRIPTS: Record<string, CardScript> = {
   // "[Hidden] When you play this from face down, attach it to a unit you control (here). [Equip] Chaos"
   // NB: pas de condition « joué depuis face cachée » — l'attache au jeu est rendue optionnelle (voir NOTES).
   'sfd-139-221': {
-    equip: { cost: { power: { n: 1, domain: 'Chaos' } } },
+    equip: { bonusMight: 2, cost: { power: { n: 1, domain: 'Chaos' } } },
     abilities: [
       {
         kind: 'triggered',
@@ -1199,7 +1199,7 @@ export const SFD_SCRIPTS: Record<string, CardScript> = {
 
   // "[Equip] — Chaos, Recycle 2 cards from your trash"
   'sfd-150-221': {
-    equip: { cost: { power: { n: 1, domain: 'Chaos' }, recycleTrash: 2 } },
+    equip: { bonusMight: 2, cost: { power: { n: 1, domain: 'Chaos' }, recycleTrash: 2 } },
   }, // Last Rites
 
   // "[Reaction][Repeat 2] Give two friendly units each +1 might this turn."
@@ -1300,7 +1300,7 @@ export const SFD_SCRIPTS: Record<string, CardScript> = {
 
   // "[Equip] Order"
   'sfd-161-221': {
-    equip: { cost: { power: { n: 1, domain: 'Order' } } },
+    equip: { bonusMight: 3, cost: { power: { n: 1, domain: 'Order' } } },
   }, // B.F. Sword
 
   // "[Action] Kill a unit at a battlefield with 2 might or less. Enemy → 1 Gold token; friendly → 2 Gold tokens."
@@ -1424,7 +1424,7 @@ export const SFD_SCRIPTS: Record<string, CardScript> = {
 
   // "[Equip] Order"
   'sfd-172-221': {
-    equip: { cost: { power: { n: 1, domain: 'Order' } } },
+    equip: { bonusMight: 1, cost: { power: { n: 1, domain: 'Order' } } },
   }, // Sacred Shears
 
   'sfd-173-221': { manual: true, keywords: ['Backline'] }, // Soraka - Wanderer — remplacement permanent de mort sur d'autres unités (« would die… instead ») ; Backline gardé en statique
@@ -1498,7 +1498,7 @@ export const SFD_SCRIPTS: Record<string, CardScript> = {
   // "[Quick-Draw][Equip] 1 any power. [Temporary]"
   'sfd-186-221': {
     quickDraw: true,
-    equip: { cost: { power: { n: 1, domain: 'any' } } },
+    equip: { bonusMight: 3, cost: { power: { n: 1, domain: 'any' } } },
     abilities: [
       {
         kind: 'triggered',
@@ -1520,18 +1520,18 @@ export const SFD_SCRIPTS: Record<string, CardScript> = {
   // "[Unique][Equip] 1 any power." (aucun autre texte)
   'sfd-190-221': {
     vanilla: true,
-    equip: { cost: { power: { n: 1, domain: 'any' } } },
+    equip: { bonusMight: 3, cost: { power: { n: 1, domain: 'any' } } },
   }, // Forgefire Cape
 
   // "[Unique][Equip] 1 any power." (aucun autre texte)
   'sfd-191-221': {
     vanilla: true,
-    equip: { cost: { power: { n: 1, domain: 'any' } } },
+    equip: { bonusMight: 3, cost: { power: { n: 1, domain: 'any' } } },
   }, // Rabadon's Deathcrown
 
   // "[Unique][Equip] 1 any power. When you play this, ready your units."
   'sfd-192-221': {
-    equip: { cost: { power: { n: 1, domain: 'any' } } },
+    equip: { bonusMight: 2, cost: { power: { n: 1, domain: 'any' } } },
     abilities: [
       { kind: 'triggered', when: { on: 'play' }, ops: [{ op: 'ready', target: { all: { controller: 'you' } } }] },
     ],

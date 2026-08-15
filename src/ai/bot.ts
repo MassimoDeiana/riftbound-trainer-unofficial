@@ -2,6 +2,7 @@ import type { Domain } from '../data/cards'
 import { def, keywords, unitMight, unitsAt } from '../engine/cardinfo'
 import { defaultAssignment } from '../engine/core'
 import type { GameAction, GameState, PlayerIx } from '../engine/types'
+import { effKeywords } from '../engine/queries'
 
 /**
  * Heuristic solo-mode bot. Called after every state change; returns the next
@@ -30,7 +31,20 @@ export function botAction(s: GameState, me: PlayerIx): GameAction | null {
         const enemies = spec.legal.filter((uid) => s.units.find((u) => u.uid === uid)?.controller !== me)
         const ordered = [...enemies, ...spec.legal.filter((uid) => !enemies.includes(uid))]
         const n = spec.min > 0 ? spec.min : Math.min(1, spec.max)
-        return { t: 'choose', player: me, choice: { kind: 'unit', uids: ordered.slice(0, n) } }
+        // Deflect (809): keep the cumulative tax within our power pool. Each single
+        // pick is affordable (the engine filters `legal`), but multi-picks add up.
+        let budget = Object.values(my.pool.power).reduce((a, b) => a + (b ?? 0), 0)
+        const picks: number[] = []
+        for (const uid of ordered) {
+          if (picks.length >= n) break
+          const u = s.units.find((x) => x.uid === uid)
+          const tax = u && u.controller !== me ? effKeywords(s, u).deflect : 0
+          if (tax > budget) continue
+          budget -= tax
+          picks.push(uid)
+        }
+        for (const uid of ordered) if (picks.length < n && !picks.includes(uid)) picks.push(uid)
+        return { t: 'choose', player: me, choice: { kind: 'unit', uids: picks.slice(0, n) } }
       }
       case 'card':
         return { t: 'choose', player: me, choice: { kind: 'card', indices: spec.legal.slice(0, spec.min) } }

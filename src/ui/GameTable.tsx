@@ -1155,14 +1155,26 @@ function HintBox({ state, me }: { state: GameState; me: PlayerIx }) {
           ? '💥 Répartis tes dégâts de combat : létal complet unité par unité (Tank en premier). Ajuste avec +/− puis Valider.'
           : k === 'battlefield'
             ? '🚩 Plusieurs affrontements sont possibles : clique le champ de bataille où commencer.'
-            : '👁 Vision : regarde la carte du dessus de ton deck — garde-la ou recycle-la sous le deck.'
+            : k === 'vision'
+              ? '👁 Vision : regarde la carte du dessus de ton deck — garde-la ou recycle-la sous le deck.'
+              : k === 'unit'
+                ? '🎯 Un effet demande une cible : clique les unités surlignées, puis Valider.'
+                : k === 'card'
+                  ? '🃏 Un effet demande de choisir des cartes : clique-les dans le panneau, puis Valider.'
+                  : k === 'mode'
+                    ? '📋 Choisis un mode : clique l’option voulue dans le panneau.'
+                    : k === 'yesNo'
+                      ? '❓ Un effet optionnel te pose une question : Oui ou Non dans le panneau.'
+                      : k === 'location'
+                        ? '📍 Choisis une destination : clique la base ou le champ de bataille proposé.'
+                        : '✋ Un effet attend ton choix dans le panneau au-dessus de ta main.'
       )
     } else {
       hints.push(`⏳ ${state.players[state.pending.player].name} fait un choix…`)
     }
   } else if (state.chain.length > 0) {
     if (state.chainActive === me) {
-      hints.push('🔗 Un sort/déclencheur est sur la chaîne. Tu peux répondre avec une carte [Reaction] de ta main, ou cliquer Passer. Quand les deux joueurs passent, le dessus de la chaîne se résout automatiquement (applique son texte avec 🔧 si besoin).')
+      hints.push('🔗 Un sort/déclencheur est sur la chaîne. Tu peux répondre avec une carte [Reaction] de ta main, ou cliquer Passer. Quand les deux joueurs passent, le dessus de la chaîne se résout et son effet s’applique automatiquement.')
     } else {
       hints.push(`🔗 ${state.players[state.chainActive ?? 0].name} peut répondre à la chaîne.`)
     }

@@ -13,7 +13,7 @@ npm run dev        # http://localhost:5173
 
 ## Mode solo (contre l'IA)
 
-Sur l'écran d'accueil : choisis ton deck, le deck de l'IA, puis **🤖 Jouer contre l'IA**. Le bot joue par les règles via le moteur (mulligan, gestion des runes, développement, prise de champs de bataille, combats) mais n'applique pas les textes d'effets : ses déclencheurs se résolvent sans effet. Bon pour apprendre le flux du jeu et tester ses decks.
+Sur l'écran d'accueil : choisis ton deck, le deck de l'IA, puis **🤖 Jouer contre l'IA**. Le bot joue par les règles via le moteur (mulligan, gestion des runes, développement, prise de champs de bataille, combats) et répond à tous les choix d'effets (cibles, modes, assignation des dégâts…) avec des heuristiques simples et déterministes. Bon pour apprendre le flux du jeu et tester ses decks.
 
 ## Jouer avec un ami
 
@@ -33,9 +33,11 @@ Sur l'écran d'accueil : choisis ton deck, le deck de l'IA, puis **🤖 Jouer co
 - La chaîne façon **FEPR** : priorité au lanceur d'abord (337.4), réponses en [Reaction], **résolution automatique** quand les deux joueurs passent, focus conservé après les chaînes de déclencheurs (346.1).
 - Mots-clés : Action, Reaction, Accelerate, Assault, Shield, Tank, Ganking, Hidden (coût : 1 puissance de n'importe quel domaine), Legion, Temporary, Deathknell (rappel), Vision.
 
-## Ce qui reste manuel (assisté)
+## Effets de cartes automatisés
 
-Les textes d'effets des cartes ne sont pas encore scriptés individuellement : quand un sort ou un déclencheur se résout, le jeu affiche son texte et vous appliquez l'effet avec les **outils manuels 🔧** (dégâts, buffs, pioche, points, étourdissement, etc.). Toutes les actions manuelles sont journalisées et visibles par l'adversaire — comme sur une vraie table. Les effets scriptés par carte peuvent être ajoutés progressivement dans `src/engine/`.
+La très grande majorité des cartes est **entièrement scriptée** : sorts ciblés (cibles surlignées au clic), déclencheurs (« When you play me », Deathknell, conquête/tenue, début/fin de tour, combat…), capacités activées (bouton ⚡ sur les unités, « Activer » sur la légende), auras et passifs, jetons, Équipements (attache, bonus, texte inactif si détaché), XP/Level/Hunt, Empower, Repeat, Deflect (taxe payée au ciblage), et plus. La couverture par set est vérifiée en CI (`node scripts/effects-coverage.mjs`).
+
+Une petite liste de cartes aux mécaniques exotiques (remplacements complexes, vols de sorts, jeux gratuits depuis le deck… — marquées `manual: true` dans `src/effects/sets/`, cartes bannies incluses) reste à résolution **manuelle assistée** : le jeu affiche leur texte et vous appliquez l'effet avec les **outils 🔧**. Toutes les actions manuelles sont journalisées et visibles par l'adversaire.
 
 ## Collection riftbound.gg
 
@@ -46,6 +48,8 @@ Sur [riftbound.gg](https://riftbound.gg/collection/) : My Collection → Export 
 ```bash
 npm test              # tests du moteur (vitest)
 npm run build         # build de production (dist/)
+npm run coverage      # gate : chaque carte de chaque set doit être scriptée
+npm run soak          # N parties bot-vs-bot (decks aléatoires tous sets) + test de déterminisme
 npm run fetch-cards   # met à jour src/data/cards.json depuis Riftcodex
 ```
 
@@ -54,9 +58,8 @@ npm run fetch-cards   # met à jour src/data/cards.json depuis Riftcodex
 - `src/game/legacy/` — moteur v1 gelé, utilisé uniquement pour relire les parties archivées au format v1.
 - Déploiement : n'importe quel hébergeur statique (`dist/` sur Netlify, GitHub Pages, Cloudflare Pages…).
 
-## Limites connues (v2 / M0)
+## Limites connues
 
 - 1v1 uniquement.
-- Deflect et les couches d'effets continus ne sont pas encore simulés (moteur d'effets par carte : en cours, voir la roadmap M1–M4).
 - Pas de reconnexion d'état automatique : bouton **↻ Resync** en cas de doute (renvoie l'état de l'autre joueur).
 - Les parties enregistrées avec l'ancien moteur (v1) restent consultables en relecture, mais ne peuvent pas être reprises.
